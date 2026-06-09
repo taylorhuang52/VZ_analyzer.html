@@ -340,6 +340,14 @@ let state = {
 // ═══════════════════════════════════════════════════════════════════════════
 function parseCSV(text, targetCols) {
   const lines = text.split(/\r?\n/);
+
+  // Extract Wafer ID from file header (e.g. "Wafer ID : RP69651-03")
+  let waferID = null;
+  for (let i = 0; i < Math.min(30, lines.length); i++) {
+    const m = lines[i].match(/Wafer\s+ID\s*:\s*(\S+)/i);
+    if (m) { waferID = m[1].trim(); break; }
+  }
+
   // Find test-name row (has column identifiers like "VZ0(7)" or "B21_BVDSS2(13)")
   let testNameIdx = -1;
   const colMap = {}; // colName → index
@@ -350,7 +358,6 @@ function parseCSV(text, targetCols) {
       const j = parts.indexOf(tc);
       if (j !== -1) {
         testNameIdx = i;
-        // Map all target cols
         for (const c of targetCols) {
           const idx = parts.indexOf(c);
           if (idx !== -1) colMap[c] = idx;
@@ -371,7 +378,9 @@ function parseCSV(text, targetCols) {
   }
   if (serialIdx === -1) return null;
 
-  // Parse data rows
+  // Parse data rows.
+  // Key = "waferID__serial" so each wafer's dies are stored independently.
+  // Same waferID + same serial appearing in multiple files = retest → later file wins.
   const records = {};
   for (let i = serialIdx + 1; i < lines.length; i++) {
     const parts = lines[i].split(',');
@@ -384,10 +393,11 @@ function parseCSV(text, targetCols) {
       if (!isNaN(v)) vals[col] = v;
     }
     if (Object.keys(vals).length > 0) {
-      records[serial] = vals;
+      const key = waferID ? `${waferID}__${serial}` : `${serial}`;
+      records[key] = vals;
     }
   }
-  return records; // serial → {col: value}
+  return records; // "waferID__serial" → {col: value}
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
