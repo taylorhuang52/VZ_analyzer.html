@@ -260,15 +260,14 @@
       <div class="panel">
         <div class="thresh-header">
           <div class="panel-title" style="margin:0">🎯 Threshold Filter</div>
-          <button class="btn btn-primary btn-sm" onclick="runThreshold()">Calculate</button>
         </div>
         <div class="thresh-form">
           <div class="thresh-row">
             <label>&gt;</label>
-            <input class="thresh-input" id="threshInput" type="text"
-              placeholder="e.g. 20.4, 20.5, 20.6" value="20.4, 20.5, 20.6, 20.7, 20.8, 20.9">
+            <select class="thresh-input" id="threshSelect" onchange="runThreshold()" style="cursor:pointer">
+            </select>
           </div>
-          <div class="thresh-hint">Enter comma-separated values. Each threshold shows % of data above it.</div>
+          <div class="thresh-hint">Select a threshold — shows % of data strictly above it per lot.</div>
         </div>
       </div>
 
@@ -487,6 +486,7 @@ async function loadFiles(fileList) {
   }
 
   progressWrap.style.display = 'none';
+  updateThreshDropdown();
   renderLotList();
   renderCharts();
   renderThresholdResults();
@@ -495,11 +495,27 @@ async function loadFiles(fileList) {
 // ═══════════════════════════════════════════════════════════════════════════
 // UI CONTROLS
 // ═══════════════════════════════════════════════════════════════════════════
+const THRESH_OPTIONS = {
+  VZ0:  [19.7, 19.8, 19.9, 20.0, 20.1, 20.2, 20.3],
+  ULLD: [20.4, 20.5, 20.6, 20.7, 20.8, 20.9],
+};
+
+function updateThreshDropdown() {
+  const opts = THRESH_OPTIONS[state.product] || THRESH_OPTIONS.ULLD;
+  const sel  = document.getElementById('threshSelect');
+  if (!sel) return;
+  const cur  = parseFloat(sel.value);
+  sel.innerHTML = opts.map(v =>
+    `<option value="${v}"${v === cur ? ' selected' : ''}>&gt; ${v}</option>`
+  ).join('');
+}
+
 function selectProduct(p) {
   state.product = p;
   document.getElementById('seg-VZ0').classList.toggle('active', p === 'VZ0');
   document.getElementById('seg-ULLD').classList.toggle('active', p === 'ULLD');
   document.getElementById('ulldColPanel').style.display = p === 'ULLD' ? '' : 'none';
+  updateThreshDropdown();
   renderCharts();
   renderThresholdResults();
 }
@@ -524,6 +540,9 @@ function onColChange(radio) {
 function runThreshold() {
   renderThresholdResults();
 }
+
+// Seed dropdown on first load
+updateThreshDropdown();
 
 // ═══════════════════════════════════════════════════════════════════════════
 // HELPERS
@@ -914,9 +933,10 @@ function renderThresholdResults() {
 
   if (!state.lotOrder.length) { el.innerHTML = ''; return; }
 
-  const raw = document.getElementById('threshInput').value;
-  const thresholds = raw.split(',').map(s => parseFloat(s.trim())).filter(v => !isNaN(v)).sort((a,b) => a-b);
-  if (!thresholds.length) { el.innerHTML = ''; return; }
+  const sel = document.getElementById('threshSelect');
+  const chosen = sel ? parseFloat(sel.value) : NaN;
+  if (isNaN(chosen)) { el.innerHTML = ''; return; }
+  const thresholds = [chosen];
 
   const col  = getActiveCol();
   const lots = state.lotOrder.filter(l => getLotValues(l).length > 0);
