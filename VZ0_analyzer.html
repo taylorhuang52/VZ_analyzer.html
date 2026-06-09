@@ -1,0 +1,967 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wafer Test Analyzer</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #222636;
+    --border: #2e334a;
+    --accent: #4f8ef7;
+    --accent2: #f7c14f;
+    --green: #3ecf8e;
+    --red: #f75f5f;
+    --text: #e4e8f5;
+    --muted: #7b85a8;
+    --font-mono: 'JetBrains Mono', 'Courier New', monospace;
+    --font: 'Inter', system-ui, sans-serif;
+    --radius: 8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; min-height: 100vh; }
+
+  /* ── Layout ── */
+  .app { display: grid; grid-template-rows: auto 1fr; min-height: 100vh; }
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 28px;
+    display: flex; align-items: center; gap: 16px;
+  }
+  header .logo { font-size: 18px; font-weight: 700; letter-spacing: -0.5px; color: var(--accent); }
+  header .subtitle { color: var(--muted); font-size: 13px; }
+  .main { display: grid; grid-template-columns: 320px 1fr; height: calc(100vh - 57px); overflow: hidden; }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 20px;
+    display: flex; flex-direction: column; gap: 20px;
+  }
+  .panel { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+  .panel-title {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.8px;
+    text-transform: uppercase; color: var(--muted); margin-bottom: 12px;
+  }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 9px 16px; border-radius: 6px; font-size: 13px; font-weight: 600;
+    cursor: pointer; border: none; transition: all .15s;
+  }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: #3a7de8; }
+  .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
+  .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-sm { padding: 5px 10px; font-size: 12px; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* Drop zone */
+  .drop-zone {
+    border: 2px dashed var(--border); border-radius: var(--radius);
+    padding: 24px 16px; text-align: center; cursor: pointer;
+    transition: all .2s; color: var(--muted);
+  }
+  .drop-zone:hover, .drop-zone.drag-over { border-color: var(--accent); color: var(--accent); background: rgba(79,142,247,.07); }
+  .drop-zone .drop-icon { font-size: 28px; margin-bottom: 8px; }
+  .drop-zone p { font-size: 12px; line-height: 1.5; }
+  #folderInput { display: none; }
+
+  /* Product selector */
+  .seg-control { display: flex; background: var(--bg); border-radius: 6px; padding: 3px; gap: 2px; }
+  .seg-btn {
+    flex: 1; padding: 7px 4px; text-align: center; font-size: 12px; font-weight: 600;
+    border-radius: 5px; cursor: pointer; transition: all .15s; color: var(--muted); border: none; background: transparent;
+  }
+  .seg-btn.active { background: var(--accent); color: #fff; }
+
+  /* Column selector (ULLD) */
+  .col-grid { display: flex; flex-direction: column; gap: 6px; }
+  .col-option {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--border); transition: all .15s;
+  }
+  .col-option:hover { border-color: var(--accent2); }
+  .col-option.active { border-color: var(--accent2); background: rgba(247,193,79,.08); }
+  .col-option input[type=radio] { accent-color: var(--accent2); }
+  .col-option .col-label { font-size: 12px; font-weight: 600; color: var(--text); }
+  .col-option .col-sub { font-size: 11px; color: var(--muted); margin-top: 1px; }
+
+  /* Threshold filter */
+  .thresh-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .thresh-form { display: flex; flex-direction: column; gap: 8px; }
+  .thresh-row { display: flex; align-items: center; gap: 8px; }
+  .thresh-row label { font-size: 12px; color: var(--muted); min-width: 26px; }
+  .thresh-input {
+    flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 5px;
+    color: var(--text); padding: 6px 9px; font-size: 13px; font-family: var(--font-mono);
+  }
+  .thresh-input:focus { outline: none; border-color: var(--accent); }
+  .thresh-hint { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+  /* Lot list */
+  .lot-list { display: flex; flex-direction: column; gap: 4px; max-height: 180px; overflow-y: auto; }
+  .lot-tag {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 10px; border-radius: 5px; font-size: 12px;
+    background: var(--bg); border: 1px solid var(--border);
+  }
+  .lot-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .lot-name { flex: 1; font-family: var(--font-mono); font-weight: 600; }
+  .lot-count { color: var(--muted); }
+
+  /* ── Main content ── */
+  .content { overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 28px; }
+
+  /* Empty state */
+  .empty-state {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 12px; color: var(--muted); text-align: center; padding: 60px;
+  }
+  .empty-icon { font-size: 48px; }
+  .empty-state h2 { color: var(--text); font-size: 18px; }
+  .empty-state p { font-size: 13px; line-height: 1.6; max-width: 320px; }
+
+  /* Threshold results */
+  .thresh-results { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .thresh-results-header {
+    background: var(--surface); padding: 12px 16px;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.8px;
+    text-transform: uppercase; color: var(--muted);
+    border-bottom: 1px solid var(--border);
+  }
+  .thresh-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 12px; }
+  .thresh-table th {
+    padding: 8px 14px; text-align: left;
+    color: var(--muted); font-weight: 600; font-size: 11px;
+    border-bottom: 1px solid var(--border); background: var(--surface);
+  }
+  .thresh-table td { padding: 8px 14px; border-bottom: 1px solid rgba(46,51,74,.5); }
+  .thresh-table tr:last-child td { border-bottom: none; }
+  .thresh-table tr:hover td { background: rgba(79,142,247,.04); }
+  .pct-bar-wrap { display: flex; align-items: center; gap: 8px; }
+  .pct-bar { height: 6px; border-radius: 3px; background: var(--accent2); min-width: 2px; transition: width .4s; }
+  .pct-val { color: var(--accent2); font-weight: 700; min-width: 42px; text-align: right; }
+
+  /* Charts grid */
+  .charts-section-title {
+    font-size: 12px; font-weight: 700; letter-spacing: 0.7px;
+    text-transform: uppercase; color: var(--muted); padding-bottom: 10px;
+    border-bottom: 1px solid var(--border); margin-bottom: 4px;
+  }
+  .charts-grid { display: grid; gap: 20px; }
+  .charts-grid.single { grid-template-columns: 1fr; }
+  .charts-grid.multi  { grid-template-columns: repeat(auto-fill, minmax(480px, 1fr)); }
+  .chart-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); overflow: hidden;
+  }
+  .chart-card-header {
+    padding: 12px 16px; display: flex; align-items: center; gap: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .chart-card-title { font-weight: 700; font-size: 13px; }
+  .chart-card-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .chart-stats { margin-left: auto; display: flex; gap: 14px; }
+  .stat-pill { text-align: right; }
+  .stat-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .stat-val { font-size: 13px; font-weight: 700; font-family: var(--font-mono); }
+  .stat-val.good { color: var(--green); }
+  .stat-val.warn { color: var(--accent2); }
+  canvas { display: block; width: 100% !important; }
+
+  /* Spinner */
+  .spinner-wrap { display: flex; align-items: center; justify-content: center; padding: 40px; gap: 10px; color: var(--muted); }
+  .spinner { width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Progress */
+  .progress-bar-wrap { background: var(--bg); border-radius: 3px; height: 4px; overflow: hidden; margin-top: 6px; }
+  .progress-bar { height: 100%; background: var(--accent); border-radius: 3px; transition: width .3s; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div>
+      <div class="logo">⬡ Wafer Test Analyzer</div>
+      <div class="subtitle">LLD · ULLD — Histogram + PDF distribution viewer</div>
+    </div>
+  </header>
+
+  <div class="main">
+    <!-- ═══ SIDEBAR ═══ -->
+    <div class="sidebar">
+
+      <!-- Drop zone -->
+      <div class="panel">
+        <div class="panel-title">📂 Import Folder</div>
+        <div class="drop-zone" id="dropZone" onclick="document.getElementById('folderInput').click()">
+          <div class="drop-icon">🗂️</div>
+          <p>Click or drag & drop a folder<br>containing lot sub-folders with CSV files</p>
+        </div>
+        <input type="file" id="folderInput" webkitdirectory multiple accept=".csv">
+        <div id="progressWrap" style="display:none; margin-top:8px;">
+          <div style="font-size:11px; color:var(--muted)" id="progressLabel">Loading…</div>
+          <div class="progress-bar-wrap"><div class="progress-bar" id="progressBar" style="width:0%"></div></div>
+        </div>
+      </div>
+
+      <!-- Product selector -->
+      <div class="panel">
+        <div class="panel-title">🔬 Product</div>
+        <div class="seg-control">
+          <button class="seg-btn active" onclick="selectProduct('VZ0')" id="seg-VZ0">LLD</button>
+          <button class="seg-btn" onclick="selectProduct('ULLD')" id="seg-ULLD">ULLD</button>
+        </div>
+      </div>
+
+      <!-- ULLD column picker (hidden for VZ0) -->
+      <div class="panel" id="ulldColPanel" style="display:none">
+        <div class="panel-title">📊 ULLD Parameter</div>
+        <div class="col-grid">
+          <label class="col-option active" id="colOpt_B40">
+            <input type="radio" name="ulldCol" value="B40_BVDSS_100uA(12)" checked onchange="onColChange(this)">
+            <div>
+              <div class="col-label">B40_BVDSS_100uA</div>
+              <div class="col-sub">Col 12 · USL 40 V · LSL 0 V</div>
+            </div>
+          </label>
+          <label class="col-option" id="colOpt_B21">
+            <input type="radio" name="ulldCol" value="B21_BVDSS2(13)" onchange="onColChange(this)">
+            <div>
+              <div class="col-label">B21_BVDSS2</div>
+              <div class="col-sub">Col 13 · USL 23 V · LSL 19 V</div>
+            </div>
+          </label>
+          <label class="col-option" id="colOpt_B22">
+            <input type="radio" name="ulldCol" value="B22_BVDSS3(14)" onchange="onColChange(this)">
+            <div>
+              <div class="col-label">B22_BVDSS3</div>
+              <div class="col-sub">Col 14 · USL 22.5 V · LSL 19.5 V</div>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <!-- Threshold filter -->
+      <div class="panel">
+        <div class="thresh-header">
+          <div class="panel-title" style="margin:0">🎯 Threshold Filter</div>
+          <button class="btn btn-primary btn-sm" onclick="runThreshold()">Calculate</button>
+        </div>
+        <div class="thresh-form">
+          <div class="thresh-row">
+            <label>&gt;</label>
+            <input class="thresh-input" id="threshInput" type="text"
+              placeholder="e.g. 20.4, 20.5, 20.6" value="20.4, 20.5, 20.6, 20.7, 20.8, 20.9">
+          </div>
+          <div class="thresh-hint">Enter comma-separated values. Each threshold shows % of data above it.</div>
+        </div>
+      </div>
+
+      <!-- Lot list -->
+      <div class="panel" id="lotListPanel" style="display:none">
+        <div class="panel-title">📋 Loaded Lots</div>
+        <div class="lot-list" id="lotList"></div>
+      </div>
+
+    </div>
+
+    <!-- ═══ CONTENT ═══ -->
+    <div class="content" id="content">
+      <div class="empty-state">
+        <div class="empty-icon">📡</div>
+        <h2>No data loaded yet</h2>
+        <p>Import a folder containing lot sub-folders. Each sub-folder should contain <code>*_dlogTDO.csv</code> files.<br><br>Select LLD or ULLD, then choose a parameter to visualize.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Chart.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+// CONFIG
+// ═══════════════════════════════════════════════════════════════════════════
+const PRODUCTS = {
+  VZ0: {
+    columns: ['VZ0(7)'],
+    limits: { 'VZ0(7)': { usl: 22.5, lsl: 19.5 } },
+    label: col => 'VZ0(7)',
+    unit: 'V',
+    binWidth: 0.02,
+  },
+  ULLD: {
+    columns: ['B40_BVDSS_100uA(12)', 'B21_BVDSS2(13)', 'B22_BVDSS3(14)'],
+    limits: {
+      'B40_BVDSS_100uA(12)': { usl: 40,   lsl: 0    },
+      'B21_BVDSS2(13)':      { usl: 23,   lsl: 19   },
+      'B22_BVDSS3(14)':      { usl: 22.5, lsl: 19.5 },
+    },
+    label: col => col.replace(/\(\d+\)$/, ''),
+    unit: 'V',
+    binWidth: 0.03,
+  },
+};
+
+const LOT_COLORS = [
+  '#4f8ef7','#f7c14f','#3ecf8e','#f75f5f',
+  '#b06af3','#4ec9f7','#f78c4f','#7bf74f',
+  '#f74fca','#4ff7c1',
+];
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════════════════
+let state = {
+  product: 'VZ0',
+  ulldCol: 'B40_BVDSS_100uA(12)',
+  lots: {},      // lotName → { serial → value }
+  lotOrder: [],  // order of lots
+  charts: [],    // Chart.js instances (for destroy)
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CSV PARSER
+// ═══════════════════════════════════════════════════════════════════════════
+function parseCSV(text, targetCols) {
+  const lines = text.split(/\r?\n/);
+
+  // Extract Wafer ID from file header (e.g. "Wafer ID : RP69651-03")
+  let waferID = null;
+  for (let i = 0; i < Math.min(30, lines.length); i++) {
+    const m = lines[i].match(/Wafer\s+ID\s*:\s*(\S+)/i);
+    if (m) { waferID = m[1].trim(); break; }
+  }
+
+  // Find test-name row (has column identifiers like "VZ0(7)" or "B21_BVDSS2(13)")
+  let testNameIdx = -1;
+  const colMap = {}; // colName → index
+
+  for (let i = 0; i < lines.length; i++) {
+    const parts = lines[i].split(',').map(s => s.trim().replace(/^"|"$/g, ''));
+    for (const tc of targetCols) {
+      const j = parts.indexOf(tc);
+      if (j !== -1) {
+        testNameIdx = i;
+        for (const c of targetCols) {
+          const idx = parts.indexOf(c);
+          if (idx !== -1) colMap[c] = idx;
+        }
+        break;
+      }
+    }
+    if (testNameIdx !== -1) break;
+  }
+  if (testNameIdx === -1) return null;
+
+  // Find Serial# row (after testNameIdx)
+  let serialIdx = -1, serialCol = 0;
+  for (let i = testNameIdx; i < Math.min(testNameIdx + 10, lines.length); i++) {
+    const parts = lines[i].split(',');
+    const j = parts.indexOf('Serial#');
+    if (j !== -1) { serialIdx = i; serialCol = j; break; }
+  }
+  if (serialIdx === -1) return null;
+
+  // Parse data rows.
+  // Key = "waferID__serial" so each wafer's dies are stored independently.
+  // Same waferID + same serial appearing in multiple files = retest → later file wins.
+  const records = {};
+  for (let i = serialIdx + 1; i < lines.length; i++) {
+    const parts = lines[i].split(',');
+    if (parts.length < 3) continue;
+    const serial = parseInt(parts[serialCol]);
+    if (isNaN(serial)) continue;
+    const vals = {};
+    for (const [col, cidx] of Object.entries(colMap)) {
+      const v = parseFloat(parts[cidx]);
+      if (!isNaN(v)) vals[col] = v;
+    }
+    if (Object.keys(vals).length > 0) {
+      const key = waferID ? `${waferID}__${serial}` : `${serial}`;
+      records[key] = vals;
+    }
+  }
+  return records; // "waferID__serial" → {col: value}
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FILE LOADING
+// ═══════════════════════════════════════════════════════════════════════════
+document.getElementById('folderInput').addEventListener('change', async (e) => {
+  await loadFiles(e.target.files);
+  e.target.value = ''; // reset so same folder can be re-imported
+});
+
+// Drag & drop
+const dz = document.getElementById('dropZone');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+dz.addEventListener('drop', async (e) => {
+  e.preventDefault(); dz.classList.remove('drag-over');
+  const items = [...e.dataTransfer.items];
+  const files = [];
+  for (const item of items) {
+    if (item.kind === 'file') {
+      const entry = item.webkitGetAsEntry?.();
+      if (entry) await collectFiles(entry, files);
+      else files.push(item.getAsFile());
+    }
+  }
+  if (files.length) await loadFiles(files);
+});
+
+async function collectFiles(entry, out) {
+  if (entry.isFile) {
+    out.push(await new Promise(res => entry.file(res)));
+  } else if (entry.isDirectory) {
+    const reader = entry.createReader();
+    const entries = await new Promise(res => reader.readEntries(res));
+    for (const e of entries) await collectFiles(e, out);
+  }
+}
+
+async function loadFiles(fileList) {
+  const progressWrap = document.getElementById('progressWrap');
+  const progressBar  = document.getElementById('progressBar');
+  const progressLabel= document.getElementById('progressLabel');
+  progressWrap.style.display = '';
+  progressBar.style.width = '0%';
+
+  // Group CSV files by folder (lot)
+  const lotFiles = {};
+  for (const file of fileList) {
+    if (!file.name.endsWith('.csv')) continue;
+    // Extract lot name from path: the folder immediately containing the CSV
+    const parts = (file.webkitRelativePath || file.name).split('/');
+    const lotName = parts.length >= 2 ? parts[parts.length - 2] : 'Unknown';
+    if (!lotFiles[lotName]) lotFiles[lotName] = [];
+    lotFiles[lotName].push(file);
+  }
+
+  const lotNames = Object.keys(lotFiles).sort();
+  const targetCols = [...PRODUCTS.VZ0.columns, ...PRODUCTS.ULLD.columns];
+
+  state.lots = {};
+  state.lotOrder = [];
+  let processed = 0;
+  const total = Object.values(lotFiles).flat().length;
+
+  for (const lot of lotNames) {
+    const files = lotFiles[lot].sort((a, b) => a.name.localeCompare(b.name));
+    const combined = {}; // serial → { col → val }
+
+    for (const file of files) {
+      const text = await file.text();
+      const rec  = parseCSV(text, targetCols);
+      if (rec) {
+        for (const [serial, vals] of Object.entries(rec)) {
+          combined[serial] = { ...(combined[serial] || {}), ...vals };
+        }
+      }
+      processed++;
+      progressBar.style.width = Math.round(100 * processed / total) + '%';
+      progressLabel.textContent = `Loading ${lot} … (${processed}/${total})`;
+      await new Promise(r => setTimeout(r, 0)); // yield to UI
+    }
+
+    if (Object.keys(combined).length > 0) {
+      state.lots[lot] = combined;
+      state.lotOrder.push(lot);
+    }
+  }
+
+  progressWrap.style.display = 'none';
+  renderLotList();
+  renderCharts();
+  renderThresholdResults();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// UI CONTROLS
+// ═══════════════════════════════════════════════════════════════════════════
+function selectProduct(p) {
+  state.product = p;
+  document.getElementById('seg-VZ0').classList.toggle('active', p === 'VZ0');
+  document.getElementById('seg-ULLD').classList.toggle('active', p === 'ULLD');
+  document.getElementById('ulldColPanel').style.display = p === 'ULLD' ? '' : 'none';
+  renderCharts();
+  renderThresholdResults();
+}
+
+function onColChange(radio) {
+  state.ulldCol = radio.value;
+  // Update active styling
+  ['B40','B21','B22'].forEach(k => {
+    document.getElementById('colOpt_' + k)?.classList.remove('active');
+  });
+  const map = {
+    'B40_BVDSS_100uA(12)': 'B40',
+    'B21_BVDSS2(13)': 'B21',
+    'B22_BVDSS3(14)': 'B22',
+  };
+  const id = map[radio.value];
+  if (id) document.getElementById('colOpt_' + id)?.classList.add('active');
+  renderCharts();
+  renderThresholdResults();
+}
+
+function runThreshold() {
+  renderThresholdResults();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
+function getActiveCol() {
+  return state.product === 'VZ0' ? 'VZ0(7)' : state.ulldCol;
+}
+
+function getLotValues(lotName) {
+  const col = getActiveCol();
+  const raw = state.lots[lotName] || {};
+  return Object.values(raw).map(v => v[col]).filter(v => v !== undefined && !isNaN(v));
+}
+
+function getProductConfig() {
+  return PRODUCTS[state.product];
+}
+
+function getActiveLimits() {
+  const col = getActiveCol();
+  return getProductConfig().limits[col] || { usl: Infinity, lsl: -Infinity };
+}
+
+function computeStats(values) {
+  if (!values.length) return {};
+  const n  = values.length;
+  const mu = values.reduce((a, b) => a + b, 0) / n;
+  const s2 = values.reduce((a, b) => a + (b - mu) ** 2, 0) / (n - 1);
+  const sigma = Math.sqrt(s2);
+  const { usl, lsl } = getActiveLimits();
+  const nPass = values.filter(v => v >= lsl && v <= usl).length;
+  const cp  = sigma > 0 ? (usl - lsl) / (6 * sigma) : NaN;
+  const cpu = sigma > 0 ? (usl - mu) / (3 * sigma)  : NaN;
+  const cpl = sigma > 0 ? (mu - lsl) / (3 * sigma)  : NaN;
+  const cpk = Math.min(cpu, cpl);
+  return { n, mu, sigma, nPass, cp, cpk, usl, lsl };
+}
+
+function normalPDF(x, mu, sigma) {
+  return Math.exp(-0.5 * ((x - mu) / sigma) ** 2) / (sigma * Math.sqrt(2 * Math.PI));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LOT LIST
+// ═══════════════════════════════════════════════════════════════════════════
+function renderLotList() {
+  const panel = document.getElementById('lotListPanel');
+  const list  = document.getElementById('lotList');
+  if (!state.lotOrder.length) { panel.style.display = 'none'; return; }
+  panel.style.display = '';
+  list.innerHTML = state.lotOrder.map((lot, i) => {
+    const vals = getLotValues(lot);
+    const color = LOT_COLORS[i % LOT_COLORS.length];
+    return `
+      <div class="lot-tag">
+        <div class="lot-dot" style="background:${color}"></div>
+        <div class="lot-name">${lot}</div>
+        <div class="lot-count">${vals.length} pts</div>
+      </div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CHARTS
+// ═══════════════════════════════════════════════════════════════════════════
+function buildBins(allValues, binWidth) {
+  const { lsl, usl } = getActiveLimits();
+  const pad = binWidth * 3;
+  const min = Math.floor((Math.min(...allValues, lsl) - pad) / binWidth) * binWidth;
+  const max = Math.ceil((Math.max(...allValues, usl) + pad) / binWidth) * binWidth;
+  const edges = [];
+  for (let x = min; x <= max + 1e-9; x += binWidth) edges.push(+x.toFixed(6));
+  return edges;
+}
+
+function histogram(values, edges) {
+  const counts = new Array(edges.length - 1).fill(0);
+  for (const v of values) {
+    for (let i = 0; i < edges.length - 1; i++) {
+      if (v >= edges[i] && v < edges[i + 1]) { counts[i]++; break; }
+      if (i === edges.length - 2 && v === edges[i + 1]) { counts[i]++; break; }
+    }
+  }
+  return counts;
+}
+
+function buildChartConfig(title, subtitle, values, color, stats, pdfMaxScale) {
+  const cfg   = getProductConfig();
+  const { usl, lsl } = stats;
+  const edges = buildBins(values, cfg.binWidth);
+  const labels = edges.slice(0, -1).map((e, i) => +((e + edges[i + 1]) / 2).toFixed(4));
+  const counts = histogram(values, edges);
+  const maxCount = Math.max(...counts, 1);
+
+  // PDF line — scaled to match histogram height
+  const pdfLine = labels.map(x => {
+    if (stats.sigma < 1e-9) return 0;
+    const raw = normalPDF(x, stats.mu, stats.sigma);
+    return raw * values.length * cfg.binWidth;
+  });
+  const maxPdf = Math.max(...pdfLine, 1e-9);
+
+  // Right axis scale: [0..1] probability density
+  // We normalise PDF so its peak = 1 on a secondary axis
+  const pdfNorm = pdfLine.map(v => v / maxPdf);
+
+  return {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          type: 'bar',
+          label: 'Count',
+          data: counts,
+          backgroundColor: color + 'b0',
+          borderColor: color,
+          borderWidth: 1,
+          yAxisID: 'yCount',
+          order: 2,
+        },
+        {
+          type: 'line',
+          label: 'PDF',
+          data: pdfNorm,
+          borderColor: color,
+          borderWidth: 2.5,
+          pointRadius: 0,
+          fill: false,
+          yAxisID: 'yPDF',
+          tension: 0.4,
+          order: 1,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        title: {
+          display: true,
+          text: [title, subtitle],
+          color: '#e4e8f5',
+          font: [{ size: 13, weight: '700' }, { size: 11 }],
+          padding: { bottom: 6 },
+        },
+        annotation: {
+          annotations: {
+            uslLine: {
+              type: 'line', scaleID: 'x', value: usl,
+              borderColor: '#f75f5f', borderWidth: 2, borderDash: [5, 3],
+              label: { display: true, content: `USL ${usl}`, color: '#f75f5f', font: { size: 10 }, position: 'start', yAdjust: -4 },
+            },
+            lslLine: {
+              type: 'line', scaleID: 'x', value: lsl,
+              borderColor: '#4f8ef7', borderWidth: 2, borderDash: [5, 3],
+              label: { display: true, content: `LSL ${lsl}`, color: '#4f8ef7', font: { size: 10 }, position: 'start', yAdjust: -4 },
+            },
+          },
+        },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              if (ctx.dataset.label === 'Count') return ` Count: ${ctx.raw}`;
+              return ` PDF (norm): ${ctx.raw.toFixed(4)}`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          type: 'linear',
+          title: { display: true, text: `${getActiveCol().replace(/\(\d+\)$/,'')} [${cfg.unit}]`, color: '#7b85a8', font: { size: 11 } },
+          grid: { color: '#2e334a', lineWidth: 0.5 },
+          ticks: { color: '#7b85a8', font: { size: 10 }, maxTicksLimit: 14, callback: v => +v.toFixed(2) },
+        },
+        yCount: {
+          position: 'left',
+          title: { display: true, text: 'Count', color: '#7b85a8', font: { size: 11 } },
+          grid: { color: '#2e334a40', lineWidth: 0.5 },
+          ticks: { color: '#7b85a8', font: { size: 10 } },
+          beginAtZero: true,
+        },
+        yPDF: {
+          position: 'right',
+          title: { display: true, text: 'PDF (normalised)', color: '#7b85a8', font: { size: 11 } },
+          grid: { display: false },
+          ticks: { color: '#7b85a8', font: { size: 10 }, callback: v => v.toFixed(2) },
+          beginAtZero: true, max: 1.3,
+        },
+      },
+    },
+  };
+}
+
+function destroyCharts() {
+  state.charts.forEach(c => c.destroy());
+  state.charts = [];
+}
+
+function renderCharts() {
+  const content = document.getElementById('content');
+  if (!state.lotOrder.length) {
+    content.innerHTML = `<div class="empty-state">
+      <div class="empty-icon">📡</div>
+      <h2>No data loaded yet</h2>
+      <p>Import a folder containing lot sub-folders with CSV files.</p>
+    </div>`;
+    return;
+  }
+
+  destroyCharts();
+  const col = getActiveCol();
+  renderLotList(); // refresh counts with new col
+
+  const lots = state.lotOrder.filter(l => getLotValues(l).length > 0);
+  if (!lots.length) {
+    content.innerHTML = `<div class="empty-state"><div class="empty-icon">🔍</div><h2>No data for this column</h2><p>The selected column has no valid data in the loaded files.</p></div>`;
+    return;
+  }
+
+  // Build HTML scaffold
+  let html = '';
+
+  // Threshold results placeholder
+  html += `<div id="threshResults"></div>`;
+
+  // Combined chart
+  html += `<div>
+    <div class="charts-section-title">All Lots — Combined</div>
+    <div class="charts-grid single">
+      <div class="chart-card" id="combined-card">
+        <div class="chart-card-header">
+          <div>
+            <div class="chart-card-title">All ${lots.length} Lots</div>
+            <div class="chart-card-sub">${col}</div>
+          </div>
+          <div class="chart-stats" id="combined-stats"></div>
+        </div>
+        <div style="padding:16px"><canvas id="chart-combined" height="220"></canvas></div>
+      </div>
+    </div>
+  </div>`;
+
+  // Per-lot charts
+  html += `<div>
+    <div class="charts-section-title">Per Lot</div>
+    <div class="charts-grid multi" id="lotChartsGrid">`;
+  for (const lot of lots) {
+    html += `<div class="chart-card">
+      <div class="chart-card-header">
+        <div>
+          <div class="chart-card-title">${lot}</div>
+          <div class="chart-card-sub">${col}</div>
+        </div>
+        <div class="chart-stats" id="stats-${lot}"></div>
+      </div>
+      <div style="padding:14px"><canvas id="chart-${lot}" height="200"></canvas></div>
+    </div>`;
+  }
+  html += `</div></div>`;
+
+  content.innerHTML = html;
+
+  // Render combined
+  const allVals = lots.flatMap(l => getLotValues(l));
+  const allStats = computeStats(allVals);
+  renderStatBadges('combined-stats', allStats);
+
+  // Build combined multi-dataset chart
+  const cfg = getProductConfig();
+  const { lsl, usl } = allStats;
+  const edges = buildBins(allVals, cfg.binWidth);
+  const midpoints = edges.slice(0, -1).map((e, i) => +((e + edges[i + 1]) / 2).toFixed(4));
+
+  const datasets = [];
+  for (let i = 0; i < lots.length; i++) {
+    const vals   = getLotValues(lots[i]);
+    const color  = LOT_COLORS[i % LOT_COLORS.length];
+    const counts = histogram(vals, edges);
+    datasets.push({ type: 'bar', label: lots[i], data: counts,
+      backgroundColor: color + '70', borderColor: color, borderWidth: 1,
+      yAxisID: 'yCount', order: 2, stack: 'counts' });
+  }
+  for (let i = 0; i < lots.length; i++) {
+    const vals   = getLotValues(lots[i]);
+    const st     = computeStats(vals);
+    const color  = LOT_COLORS[i % LOT_COLORS.length];
+    if (st.sigma < 1e-9) continue;
+    const pdfLine = midpoints.map(x => normalPDF(x, st.mu, st.sigma) * vals.length * cfg.binWidth);
+    const pdfMax  = Math.max(...pdfLine, 1e-9);
+    datasets.push({ type: 'line', label: `${lots[i]} PDF`, data: pdfLine.map(v => v / pdfMax),
+      borderColor: color, borderWidth: 2, pointRadius: 0, fill: false,
+      yAxisID: 'yPDF', tension: 0.4, order: 1 });
+  }
+
+  const combinedCfg = {
+    type: 'bar',
+    data: { labels: midpoints, datasets },
+    options: {
+      responsive: true, animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: true, position: 'top', labels: { color: '#7b85a8', font: { size: 10 }, boxWidth: 12, padding: 10, filter: i => !i.text.includes('PDF') } },
+        annotation: { annotations: {
+          uslLine: { type: 'line', scaleID: 'x', value: usl, borderColor: '#f75f5f', borderWidth: 2, borderDash: [5,3],
+            label: { display: true, content: `USL ${usl}`, color: '#f75f5f', font: { size: 10 }, position: 'start', yAdjust: -4 } },
+          lslLine: { type: 'line', scaleID: 'x', value: lsl, borderColor: '#4f8ef7', borderWidth: 2, borderDash: [5,3],
+            label: { display: true, content: `LSL ${lsl}`, color: '#4f8ef7', font: { size: 10 }, position: 'start', yAdjust: -4 } },
+        }},
+        title: { display: false },
+      },
+      scales: {
+        x: { type: 'linear', title: { display: true, text: `${col.replace(/\(\d+\)$/,'')} [${cfg.unit}]`, color: '#7b85a8', font: { size: 11 } },
+          grid: { color: '#2e334a', lineWidth: 0.5 }, ticks: { color: '#7b85a8', font: { size: 10 }, maxTicksLimit: 14, callback: v => +v.toFixed(2) } },
+        yCount: { position: 'left', stacked: true, title: { display: true, text: 'Count', color: '#7b85a8', font: { size: 11 } },
+          grid: { color: '#2e334a40' }, ticks: { color: '#7b85a8' }, beginAtZero: true },
+        yPDF:   { position: 'right', title: { display: true, text: 'PDF (norm)', color: '#7b85a8', font: { size: 11 } },
+          grid: { display: false }, ticks: { color: '#7b85a8', callback: v => v.toFixed(2) }, beginAtZero: true, max: 1.3 },
+      },
+    },
+  };
+
+  // Load annotation plugin
+  loadAnnotationPlugin(() => {
+    const ctx = document.getElementById('chart-combined')?.getContext('2d');
+    if (ctx) state.charts.push(new Chart(ctx, combinedCfg));
+
+    // Per-lot
+    for (let i = 0; i < lots.length; i++) {
+      const lot   = lots[i];
+      const vals  = getLotValues(lot);
+      const color = LOT_COLORS[i % LOT_COLORS.length];
+      const st    = computeStats(vals);
+      renderStatBadges(`stats-${lot}`, st);
+
+      const pct = st.n ? (100 * st.nPass / st.n).toFixed(2) : '—';
+      const chartCfg = buildChartConfig(
+        lot, `${col}  |  N=${st.n}  Pass=${st.nPass} (${pct}%)  Mean=${st.mu?.toFixed(4)}  Cp=${st.cp?.toFixed(3)}  Cpk=${st.cpk?.toFixed(3)}`,
+        vals, color, st
+      );
+      const c = document.getElementById(`chart-${lot}`)?.getContext('2d');
+      if (c) state.charts.push(new Chart(c, chartCfg));
+    }
+
+    renderThresholdResults();
+  });
+}
+
+// Lazy-load annotation plugin once
+let _annotPluginLoaded = false;
+let _annotCallbacks = [];
+function loadAnnotationPlugin(cb) {
+  if (_annotPluginLoaded) { cb(); return; }
+  _annotCallbacks.push(cb);
+  if (_annotCallbacks.length > 1) return;
+  const s = document.createElement('script');
+  s.src = 'https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-annotation/3.0.1/chartjs-plugin-annotation.min.js';
+  s.onload = () => {
+    _annotPluginLoaded = true;
+    _annotCallbacks.forEach(f => f());
+    _annotCallbacks = [];
+  };
+  s.onerror = () => { _annotPluginLoaded = true; _annotCallbacks.forEach(f => f()); _annotCallbacks = []; };
+  document.head.appendChild(s);
+}
+
+function renderStatBadges(id, st) {
+  const el = document.getElementById(id);
+  if (!el || !st.n) return;
+  const pct = (100 * st.nPass / st.n).toFixed(2);
+  const cpkOk = st.cpk >= 1.33;
+  el.innerHTML = `
+    <div class="stat-pill"><div class="stat-label">N</div><div class="stat-val">${st.n}</div></div>
+    <div class="stat-pill"><div class="stat-label">Yield</div><div class="stat-val ${parseFloat(pct) >= 99 ? 'good' : 'warn'}">${pct}%</div></div>
+    <div class="stat-pill"><div class="stat-label">Mean</div><div class="stat-val">${st.mu?.toFixed(4)}</div></div>
+    <div class="stat-pill"><div class="stat-label">Cpk</div><div class="stat-val ${cpkOk ? 'good' : 'warn'}">${st.cpk?.toFixed(3)}</div></div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THRESHOLD RESULTS
+// ═══════════════════════════════════════════════════════════════════════════
+function renderThresholdResults() {
+  const el = document.getElementById('threshResults');
+  if (!el) return;
+
+  if (!state.lotOrder.length) { el.innerHTML = ''; return; }
+
+  const raw = document.getElementById('threshInput').value;
+  const thresholds = raw.split(',').map(s => parseFloat(s.trim())).filter(v => !isNaN(v)).sort((a,b) => a-b);
+  if (!thresholds.length) { el.innerHTML = ''; return; }
+
+  const col  = getActiveCol();
+  const lots = state.lotOrder.filter(l => getLotValues(l).length > 0);
+  if (!lots.length) { el.innerHTML = ''; return; }
+
+  const colLabel = col.replace(/\(\d+\)$/, '');
+
+  // Build table
+  let rows = '';
+  for (const lot of lots) {
+    const vals = getLotValues(lot);
+    const n    = vals.length;
+    if (!n) continue;
+    for (const t of thresholds) {
+      const above = vals.filter(v => v > t).length;
+      const pct   = (100 * above / n).toFixed(2);
+      const barW  = Math.round(parseFloat(pct));
+      rows += `<tr>
+        <td style="font-weight:700;color:var(--accent)">${lot}</td>
+        <td>${colLabel}</td>
+        <td>&gt; ${t}</td>
+        <td>${above} / ${n}</td>
+        <td>
+          <div class="pct-bar-wrap">
+            <div class="pct-bar" style="width:${barW * 1.4}px"></div>
+            <span class="pct-val">${pct}%</span>
+          </div>
+        </td>
+      </tr>`;
+    }
+  }
+
+  el.innerHTML = `
+    <div class="thresh-results">
+      <div class="thresh-results-header">Threshold Analysis — ${colLabel}</div>
+      <table class="thresh-table">
+        <thead>
+          <tr>
+            <th>Lot</th><th>Parameter</th><th>Threshold</th><th>Count (above)</th><th>Percentage</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+</script>
+</body>
+</html>
