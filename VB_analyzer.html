@@ -210,7 +210,7 @@
         <div class="panel-title">📂 Import Folder</div>
         <div class="drop-zone" id="dropZone" onclick="document.getElementById('folderInput').click()">
           <div class="drop-icon">📄</div>
-          <p>Click or drag & drop CSV files<br>(can select multiple lot CSV files at once)</p>
+          <p>Click to browse a folder, or drag & drop files/folders<br>(subdirectories are scanned automatically — every .csv found anywhere inside is imported)</p>
         </div>
         <input type="file" id="folderInput" webkitdirectory multiple accept=".csv">
         <div id="progressWrap" style="display:none; margin-top:8px;">
@@ -418,18 +418,96 @@ dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dra
 dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
 dz.addEventListener('drop', async (e) => {
   e.preventDefault(); dz.classList.remove('drag-over');
-  const files = Array.from(e.dataTransfer.files || [])
-    .filter(f => f.name.toLowerCase().endsWith('.csv'));
-  if (files.length) await loadFiles(files);
+  window.__vbFileProtocolDirBug = false;
+
+  const items = e.dataTransfer.items;
+  let files = [];
+
+  if (items && items.length && items[0] && items[0].webkitGetAsEntry) {
+    // FileSystem API path: walk into dropped folders at any depth so CSV
+    // files inside nested subdirectories are picked up automatically.
+    const entries = Array.from(items)
+      .map(it => { try { return it.webkitGetAsEntry && it.webkitGetAsEntry(); } catch (err) { return null; } })
+      .filter(Boolean);
+    for (const entry of entries) {
+      try {
+        await collectFiles(entry, files, '');
+      } catch (err) {
+        // One bad file/folder shouldn't abort the whole drop.
+        console.error('[VB Analyzer] Failed to read dropped item', entry && entry.fullPath, err);
+      }
+    }
+    files = files.filter(f => f.name.toLowerCase().endsWith('.csv'));
+  }
+
+  // Fallback: entry API unsupported (e.g. Safari has no directory drag&drop
+  // support) or found nothing via recursion — try the flat file list too.
+  if (!files.length) {
+    files = Array.from(e.dataTransfer.files || [])
+      .filter(f => f.name.toLowerCase().endsWith('.csv'));
+  }
+
+  console.log(`[VB Analyzer] Drop: found ${files.length} CSV file(s)`, files.map(f => f.webkitRelativePath || f._relPath || f.name));
+
+  if (files.length) {
+    await loadFiles(files);
+  } else if (window.__vbFileProtocolDirBug) {
+    alert(
+      '偵測到瀏覽器限制：\n\n' +
+      '這個頁面是以本機檔案 (file://) 方式開啟的。Chrome／Edge 基於安全性沙盒機制，' +
+      '禁止在 file:// 頁面上用「拖放資料夾」讀取子目錄內容（這是瀏覽器層級的限制，網頁本身無法繞過）。\n\n' +
+      '解決方式（擇一）：\n' +
+      '1. 改用左上角「Click to browse a folder」點擊選取資料夾 —— 這個方式在 file:// 下仍可正常讀取所有子目錄的 csv。\n' +
+      '2. 或是把這個 html 檔放進一個資料夾，用本機伺服器開啟（例如在該資料夾下執行 python -m http.server，' +
+      '再用瀏覽器開啟 http://localhost:8000/VB_analyzer.html），拖放資料夾即可正常運作。\n\n' +
+      '拖放單一 .csv 檔案（非資料夾）不受此限制影響，仍可直接使用。'
+    );
+  } else {
+    alert('沒有在拖放的內容中找到 .csv 檔案。\n\n若拖放的是資料夾，請確認資料夾（或其子資料夾）內含 .csv 檔案；部分瀏覽器（如 Safari）不支援拖放資料夾讀取，請改用左上角點擊選取資料夾的方式匯入。');
+  }
 });
 
-async function collectFiles(entry, out) {
+// Recursively collect File objects from a dropped FileSystemEntry, at any
+// subdirectory depth. Each collected file gets a `_relPath` property so
+// downstream lot-grouping logic can find the folder that directly contains it.
+async function collectFiles(entry, out, basePath) {
+  if (!entry) return;
   if (entry.isFile) {
-    out.push(await new Promise(res => entry.file(res)));
+    let file;
+    try {
+      file = await new Promise((res, rej) => entry.file(res, rej));
+    } catch (err) {
+      console.error('[VB Analyzer] Failed to read file entry', entry.fullPath, err);
+      return;
+    }
+    try {
+      Object.defineProperty(file, '_relPath', {
+        value: entry.fullPath || (basePath + file.name),
+        writable: false,
+      });
+    } catch (err) { /* ignore if the property can't be attached */ }
+    out.push(file);
   } else if (entry.isDirectory) {
     const reader = entry.createReader();
-    const entries = await new Promise(res => reader.readEntries(res));
-    for (const e of entries) await collectFiles(e, out);
+    // readEntries() only returns a batch at a time; keep calling until empty.
+    let entries = [];
+    try {
+      while (true) {
+        const batch = await new Promise((res, rej) => reader.readEntries(res, rej));
+        if (!batch.length) break;
+        entries = entries.concat(batch);
+      }
+    } catch (err) {
+      console.error('[VB Analyzer] Failed to read directory entries', entry.fullPath, err);
+      // Chrome blocks the recursive directory-reader API when the page itself
+      // was opened as a local file:// document (throws EncodingError about a
+      // malformed/too-long Data URL). Flag this so the drop handler can show
+      // an accurate, actionable message instead of "no csv found".
+      if (location.protocol === 'file:' && err && err.name === 'EncodingError') {
+        window.__vbFileProtocolDirBug = true;
+      }
+    }
+    for (const e of entries) await collectFiles(e, out, basePath + entry.name + '/');
   }
 }
 
@@ -444,8 +522,11 @@ async function loadFiles(fileList) {
   const lotFiles = {};
   for (const file of fileList) {
     if (!file.name.endsWith('.csv')) continue;
-    // Extract lot name from path: the folder immediately containing the CSV
-    const parts = (file.webkitRelativePath || file.name).split('/');
+    // Extract lot name from path: the folder immediately containing the CSV.
+    // webkitRelativePath comes from the "browse folder" input; _relPath comes
+    // from recursive drag-and-drop traversal (see collectFiles above) — both
+    // may include any number of nested subdirectory levels.
+    const parts = (file.webkitRelativePath || file._relPath || file.name).split('/').filter(Boolean);
     let lotName = parts.length >= 2 ? parts[parts.length - 2] : null;
     if (!lotName) {
       // No folder path (files dropped directly): guess lot from filename prefix
