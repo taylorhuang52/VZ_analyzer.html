@@ -1,0 +1,623 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>同心圓 Fail 分析 · LLD / ULLD</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0a0e11; --panel:#10161a; --panel2:#131a1f; --line:#1f2b32; --line2:#2a3942;
+  --text:#e9eff3; --mute:#7d8c97; --dim:#55636d; --amber:#f2a33a; --red:#ff6262; --blue:#5ab0ff;
+  --sans:"Space Grotesk","Segoe UI","Microsoft JhengHei",system-ui,sans-serif;
+  --mono:"JetBrains Mono","IBM Plex Mono",ui-monospace,Consolas,"Microsoft JhengHei",monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px}
+body{min-height:100vh}
+button,select,input{font:inherit;color:inherit}
+.wrap{max-width:1480px;margin:0 auto;padding:16px 20px 48px}
+
+/* top bar */
+.top{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:6px 0 14px}
+.brand{display:flex;align-items:baseline;gap:12px;margin-right:auto}
+.brand h1{margin:0;font-size:19px;letter-spacing:.2px}
+.brand span{color:var(--mute);font:12px var(--mono)}
+.btn{background:var(--panel2);border:1px solid var(--line2);border-radius:7px;padding:7px 14px;cursor:pointer;font:600 12.5px var(--mono);color:var(--text)}
+.btn:hover{border-color:#44606f;background:#18222a}
+.btn.primary{background:#1c3a4a;border-color:#2f6a86;color:#bfe6ff}
+.btn.primary:hover{background:#21465a}
+.btn:disabled{opacity:.4;cursor:default}
+
+/* controls */
+.controls{display:flex;flex-wrap:wrap;gap:12px 16px;align-items:flex-end;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin-bottom:14px}
+.ctl{display:flex;flex-direction:column;gap:5px;min-width:0}
+.ctl label{font:10.5px var(--mono);letter-spacing:.8px;text-transform:uppercase;color:var(--mute)}
+.ctl select{background:#0d1317;border:1px solid var(--line2);border-radius:7px;padding:7px 10px;font:12.5px var(--mono);max-width:100%;outline:none}
+.ctl select:focus{border-color:var(--blue)}
+.ctl.grow{flex:1 1 360px}
+.ctl.grow select{width:100%}
+.chk{display:flex;align-items:center;gap:6px;font:12px var(--mono);color:var(--mute);padding-bottom:7px;cursor:pointer;user-select:none}
+.chk input{accent-color:var(--blue)}
+
+details.files{margin:-6px 0 14px;font:12px var(--mono);color:var(--mute)}
+details.files summary{cursor:pointer;padding:4px 2px}
+details.files table{border-collapse:collapse;margin-top:6px;width:100%;max-height:260px}
+details.files .scroll{max-height:240px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+details.files td,details.files th{padding:4px 10px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+details.files th{position:sticky;top:0;background:var(--panel);color:var(--dim);font-weight:400}
+.err{color:#ff9b7a}
+
+/* drop zone */
+.drop{border:1.5px dashed var(--line2);border-radius:14px;padding:70px 20px;text-align:center;color:var(--mute);cursor:pointer;background:var(--panel);transition:.15s}
+.drop:hover,.drop.over,body.dragging .drop{border-color:var(--blue);color:var(--text);background:#111c24}
+.drop b{display:block;font-size:17px;color:var(--text);margin-bottom:8px}
+.drop small{font:12px var(--mono)}
+.prog{font:12px var(--mono);color:var(--blue);margin:0 0 10px;min-height:16px}
+
+/* analysis */
+.ahead{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:6px 2px 12px}
+.tag{font:700 11px var(--mono);letter-spacing:1.5px;padding:3px 8px;border-radius:5px;color:#10161a}
+.ahead h2{margin:0;font-size:17px}
+.ahead .meta{margin-left:auto;font:12px var(--mono);color:var(--mute)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px}
+.top-card{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:28px;padding:22px 24px;margin-bottom:16px}
+@media(max-width:1000px){.top-card{grid-template-columns:1fr}}
+.verdict{display:inline-block;font:700 14px var(--sans);padding:9px 15px;border-radius:7px;border:1px solid;margin-bottom:14px}
+.verdict.in{color:var(--amber);border-color:var(--amber);background:rgba(242,163,58,.1)}
+.verdict.out{color:var(--red);border-color:#ff5b5b;background:rgba(255,91,91,.14)}
+.verdict.none{color:var(--mute);border-color:var(--line2);background:#12191e}
+.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+@media(max-width:560px){.stats{grid-template-columns:repeat(2,1fr)}}
+.stat{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:11px 14px}
+.stat .k{font:10.5px var(--mono);letter-spacing:.8px;text-transform:uppercase;color:var(--mute);margin-bottom:6px}
+.stat .v{font:700 17px var(--mono)}
+.stat .v small{font-weight:400;color:var(--dim);font-size:12px}
+.note{font:11.5px/1.7 var(--mono);color:var(--mute);margin:12px 0 0}
+table.zt{width:100%;border-collapse:collapse;font:13px var(--mono)}
+.zt th{font:10.5px var(--mono);letter-spacing:.8px;text-transform:uppercase;color:var(--mute);text-align:left;font-weight:400;padding:2px 8px 9px;border-bottom:1px solid var(--line2)}
+.zt td{padding:11px 8px;border-bottom:1px solid var(--line);font-weight:700}
+.zt td.ci{color:var(--mute);font-weight:400}
+.zt td.bar{width:26%}
+.track{height:7px;background:#161f25;border-radius:4px;overflow:hidden}
+.track i{display:block;height:100%;border-radius:4px}
+.charts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+@media(max-width:1100px){.charts{grid-template-columns:1fr}}
+.chart{padding:16px 16px 10px}
+.chart .ch{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:4px}
+.chart h3{margin:0;font-size:14.5px}
+.chart .sub{font:12px var(--mono);color:var(--amber);margin-top:3px}
+.png{background:transparent;border:1px solid var(--line2);border-radius:6px;padding:6px 11px;font:11.5px var(--mono);color:var(--blue);cursor:pointer;white-space:nowrap}
+.png:hover{border-color:var(--blue);background:#12202b}
+.chart canvas{width:100%;display:block;margin-top:2px}
+
+details.ov{margin-top:18px}
+details.ov summary{cursor:pointer;font:600 13px var(--mono);color:var(--mute);padding:6px 2px}
+details.ov .scroll{overflow:auto;margin-top:8px}
+table.ovt{border-collapse:collapse;width:100%;font:12px var(--mono);min-width:860px}
+.ovt th{font-weight:400;color:var(--mute);font-size:10.5px;letter-spacing:.7px;text-transform:uppercase;text-align:right;padding:8px 10px;border-bottom:1px solid var(--line2);position:sticky;top:0;background:var(--panel)}
+.ovt td{text-align:right;padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+.ovt th:first-child,.ovt td:first-child{text-align:left}
+.ovt tbody tr{cursor:pointer}
+.ovt tbody tr:hover{background:#151f26}
+.ovt tr.sel{background:#16242d}
+.pill{font-weight:700}
+.pill.in{color:var(--amber)} .pill.out{color:var(--red)} .pill.none{color:var(--dim)}
+
+#tip{position:fixed;z-index:50;pointer-events:none;background:#0b1115;border:1px solid var(--line2);border-radius:7px;padding:7px 10px;font:11.5px/1.55 var(--mono);color:var(--text);white-space:pre;display:none;box-shadow:0 6px 22px rgba(0,0,0,.5)}
+.empty{padding:50px;text-align:center;color:var(--mute);font:13px var(--mono)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div class="brand"><h1>同心圓 Fail 分析</h1><span>LLD (RK#####) / ULLD (RP#####) · dlogTDO csv / zip</span></div>
+    <button class="btn primary" id="btnPick">匯入 CSV / ZIP</button>
+    <button class="btn" id="btnClear" disabled>清除</button>
+    <input type="file" id="file" multiple accept=".csv,.txt,.zip" hidden>
+  </div>
+  <div class="prog" id="prog"></div>
+
+  <div class="controls" id="controls" hidden>
+    <div class="ctl"><label for="selProd">產品</label><select id="selProd"></select></div>
+    <div class="ctl"><label for="selLot">Lot</label><select id="selLot"></select></div>
+    <div class="ctl grow"><label for="selTest">測項</label><select id="selTest"></select></div>
+    <div class="ctl"><label for="selMode">Fail 判定</label>
+      <select id="selMode">
+        <option value="first">首個 fail 測項(Bin 歸屬,同附圖)</option>
+        <option value="any">任何超規格(不論前序是否已 fail)</option>
+      </select></div>
+    <label class="chk"><input type="checkbox" id="chkHide" checked>隱藏無 fail 測項</label>
+    <label class="chk"><input type="checkbox" id="chkDedup" checked>重複 Wafer 只留最新</label>
+    <label class="chk"><input type="checkbox" id="chkFlip">Y 軸翻轉</label>
+  </div>
+  <details class="files" id="filesBox" hidden><summary id="filesSum"></summary><div class="scroll"><table id="filesTbl"></table></div></details>
+
+  <main id="main">
+    <div class="drop" id="drop"><b>拖曳 CSV / ZIP 到此,或點擊選取檔案(可多選)</b>
+      <small>支援 .csv、.zip(可含多個 csv,亦可巢狀 zip) · 資料只在瀏覽器本機處理,不會上傳</small></div>
+  </main>
+</div>
+<div id="tip"></div>
+
+<script>
+'use strict';
+/* ====================== utils ====================== */
+const SANS='"Space Grotesk","Segoe UI","Microsoft JhengHei",system-ui,sans-serif';
+const MONO='"JetBrains Mono","IBM Plex Mono",ui-monospace,Consolas,"Microsoft JhengHei",monospace';
+const PALETTE=['#ff7a59','#5ab0ff','#6fd39a','#c792ea','#f2c94c','#4dd0e1','#f48fb1','#a3c76d'];
+const AMBER='#f2a33a';
+const $=id=>document.getElementById(id);
+const fmtInt=n=>Math.round(n).toLocaleString('en-US');
+const pct=(x,d=2)=>Number.isFinite(x)?(100*x).toFixed(d)+'%':'—';
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function erfc(x){const z=Math.abs(x),t=1/(1+.5*z);
+  const r=t*Math.exp(-z*z-1.26551223+t*(1.00002368+t*(.37409196+t*(.09678418+t*(-.18628806+t*(.27886807+t*(-1.13520398+t*(1.48851587+t*(-.82215223+t*.17087277)))))))));
+  return x>=0?r:2-r;}
+const pOfZ=z=>Number.isFinite(z)?erfc(Math.abs(z)/Math.SQRT2):NaN;
+function fmtP(p){if(!Number.isFinite(p))return '—';if(p===0)return '<1e-15';return p<1e-3?p.toExponential(1):p.toFixed(3);}
+function fmtZ(z){return Number.isFinite(z)?z.toFixed(2):'—';}
+function wilson(f,n){if(!n)return[NaN,NaN];const z=1.96,p=f/n,d=1+z*z/n,c=p+z*z/(2*n),h=z*Math.sqrt(p*(1-p)/n+z*z/(4*n*n));return[(c-h)/d,(c+h)/d];}
+function niceStep(range,n){const raw=range/n,p=Math.pow(10,Math.floor(Math.log10(raw))),m=raw/p;return(m<1.5?1:m<3?2:m<7?5:10)*p;}
+function ticks(lo,hi,n=5){const s=niceStep(hi-lo||1,n),a=Math.ceil(lo/s-1e-9)*s,o=[];for(let v=a;v<=hi+1e-9;v+=s)o.push(+v.toFixed(10));return{t:o,s};}
+function median(a){if(!a.length)return NaN;const b=[...a].sort((x,y)=>x-y),m=b.length>>1;return b.length%2?b[m]:(b[m-1]+b[m])/2;}
+
+/* ====================== zip reader (no library) ====================== */
+function decodeName(u8,flag){try{return new TextDecoder(flag&0x800?'utf-8':'utf-8',{fatal:true}).decode(u8);}catch(e){return new TextDecoder('latin1').decode(u8);}}
+function readZipEntries(buf){
+  const dv=new DataView(buf),u8=new Uint8Array(buf);let eocd=-1;
+  for(let i=buf.byteLength-22;i>=Math.max(0,buf.byteLength-65557);i--){if(dv.getUint32(i,true)===0x06054b50){eocd=i;break;}}
+  if(eocd<0)throw new Error('不是有效的 ZIP');
+  const total=dv.getUint16(eocd+10,true);let off=dv.getUint32(eocd+16,true);const out=[];
+  for(let k=0;k<total;k++){
+    if(dv.getUint32(off,true)!==0x02014b50)break;
+    const flag=dv.getUint16(off+8,true),method=dv.getUint16(off+10,true),csize=dv.getUint32(off+20,true),
+          nl=dv.getUint16(off+28,true),el=dv.getUint16(off+30,true),cl=dv.getUint16(off+32,true),lho=dv.getUint32(off+42,true);
+    const name=decodeName(u8.subarray(off+46,off+46+nl),flag);off+=46+nl+el+cl;
+    if(name.endsWith('/'))continue;
+    if(csize===0xFFFFFFFF||lho===0xFFFFFFFF)throw new Error('不支援 ZIP64');
+    const lnl=dv.getUint16(lho+26,true),lel=dv.getUint16(lho+28,true),ds=lho+30+lnl+lel;
+    out.push({name,method,data:u8.subarray(ds,ds+csize)});
+  }
+  return out;
+}
+async function inflateRaw(data){
+  if(typeof DecompressionStream==='undefined')throw new Error('瀏覽器不支援 DecompressionStream,請使用新版 Chrome / Edge / Firefox');
+  const s=new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  return new Uint8Array(await new Response(s).arrayBuffer());
+}
+/* returns [{name, bytes(Uint8Array)}] flattened (nested zips expanded) */
+async function expand(name,bytes,depth=0){
+  const low=name.toLowerCase();
+  if(low.endsWith('.zip')&&depth<4){
+    const out=[];
+    for(const e of readZipEntries(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength))){
+      if(/(^|\/)(__MACOSX|\._)/.test(e.name))continue;
+      const b=e.method===0?e.data:e.method===8?await inflateRaw(e.data):null;
+      if(!b){out.push({name:name+'!'+e.name,error:'不支援的壓縮方式 '+e.method});continue;}
+      out.push(...await expand(name+'!'+e.name,b,depth+1));
+    }
+    return out;
+  }
+  return[{name,bytes}];
+}
+
+/* ====================== log parser ====================== */
+function splitCSV(line){
+  if(line.indexOf('"')<0)return line.split(',');
+  const out=[];let cur='',q=false;
+  for(let i=0;i<line.length;i++){const c=line[i];
+    if(q){if(c==='"'){if(line[i+1]==='"'){cur+='"';i++;}else q=false;}else cur+=c;}
+    else if(c==='"')q=true;else if(c===','){out.push(cur);cur='';}else cur+=c;}
+  out.push(cur);return out;
+}
+const num=s=>{if(s===undefined)return NaN;s=s.trim();if(s==='')return NaN;const v=parseFloat(s);return v};
+function productOf(lot){const p=(lot||'').slice(0,2).toUpperCase();return p==='RK'?'LLD':p==='RP'?'ULLD':'Other';}
+
+function parseLog(text,fname){
+  const lines=text.split(/\r?\n/);
+  const hi=lines.findIndex(l=>l.startsWith('Serial#'));
+  if(hi<0)throw new Error('找不到 Serial# 資料表頭(非 dlog csv?)');
+  const head=splitCSV(lines[hi]).map(s=>s.trim());
+  const xi=head.indexOf('XAdr'),yi=head.indexOf('YAdr'),bi=head.indexOf('Bin#');
+  if(xi<0||yi<0||bi<0)throw new Error('缺少 XAdr / YAdr / Bin# 欄位');
+  const c0=Math.max(xi,yi)+1;
+  const meta={},blocks=[];
+  for(let i=0;i<hi;i++){
+    const l=lines[i];
+    if(l.startsWith(',,,')){blocks.push(splitCSV(l));continue;}
+    const m=/^([A-Za-z][^:]*?)\s*:\s*(.*)$/.exec(l);
+    if(m&&!(m[1].trim() in meta))meta[m[1].trim()]=m[2].trim();
+  }
+  if(blocks.length<4)throw new Error('找不到測項名稱 / 規格列');
+  const [namesR,unitsR,upR,loR]=blocks.slice(-4);
+  let T=0;for(let i=c0;i<namesR.length;i++)if(namesR[i].trim()!=='')T=i-c0+1;
+  if(!T)throw new Error('沒有測項');
+  const tests=[];
+  for(let t=0;t<T;t++){
+    const name=(namesR[c0+t]||'').trim();
+    tests.push({name,short:name.replace(/\(\d+\)$/,''),unit:(unitsR[c0+t]||'').trim(),upper:num(upR[c0+t]),lower:num(loR[c0+t])});
+  }
+  // same short name appears more than once (e.g. VZ0(5), VZ0(6)) -> keep the index to tell them apart
+  const dupCnt={};for(const te of tests)dupCnt[te.short]=(dupCnt[te.short]||0)+1;
+  for(const te of tests)if(dupCnt[te.short]>1)te.short=te.name;
+  const X=[],Y=[],B=[],rows=[];
+  for(let i=hi+1;i<lines.length;i++){
+    const l=lines[i];if(!l||!l.trim())continue;
+    const c=splitCSV(l);const x=+c[xi],y=+c[yi];
+    if(!Number.isFinite(x)||!Number.isFinite(y)||c[xi]===''||c[yi]==='')continue;
+    X.push(x);Y.push(y);B.push(+c[bi]);rows.push(c);
+  }
+  const n=X.length;if(!n)throw new Error('沒有 die 資料');
+  const vals=new Float64Array(n*T).fill(NaN);
+  for(let i=0;i<n;i++){const c=rows[i];for(let t=0;t<T;t++){const v=num(c[c0+t]);if(v===v)vals[i*T+t]=v;}}
+  // first-fail index per die
+  const ff=new Int16Array(n).fill(32767);
+  for(let i=0;i<n;i++)for(let t=0;t<T;t++){
+    const v=vals[i*T+t];if(v!==v)continue;
+    if(v>tests[t].upper||v<tests[t].lower){ff[i]=t;break;}
+  }
+  // normalized radius: wafer centroid, R = farthest die
+  let sx=0,sy=0;for(let i=0;i<n;i++){sx+=X[i];sy+=Y[i];}
+  const cx=sx/n,cy=sy/n,r=new Float64Array(n);let R=0;
+  for(let i=0;i<n;i++){r[i]=Math.hypot(X[i]-cx,Y[i]-cy);if(r[i]>R)R=r[i];}
+  if(R>0)for(let i=0;i<n;i++)r[i]/=R;
+  const lot=meta['Lot ID']||fname.replace(/[-_].*$/,'');
+  const wafer=meta['Wafer ID']||fname;
+  const endT=Date.parse(meta['Test End Date']||'')||Date.parse(meta['Test Start Date']||'')||0;
+  return{fname,lot,wafer,meta,product:productOf(lot),tests,T,n,x:X,y:Y,bin:B,vals,ff,r,cx,cy,R,endT,
+         prodId:meta['Production ID']||'',sig:tests.map(t=>t.name).join('|')};
+}
+
+/* ====================== state ====================== */
+const S={wafers:[],log:[],groupKey:null,lot:'ALL',test:0,mode:'first',hide:true,dedup:true,flip:false,charts:[]};
+const groupKeyOf=w=>w.product+'||'+w.sig;
+function groups(){
+  const m=new Map();
+  for(const w of S.wafers){const k=groupKeyOf(w);if(!m.has(k))m.set(k,{key:k,product:w.product,prodId:w.prodId,wafers:[]});m.get(k).wafers.push(w);}
+  return[...m.values()].sort((a,b)=>a.product.localeCompare(b.product));
+}
+function selectedWafers(){
+  const g=groups().find(g=>g.key===S.groupKey);if(!g)return[];
+  let ws=g.wafers;
+  if(S.lot!=='ALL')ws=ws.filter(w=>w.lot===S.lot);
+  if(S.dedup){
+    const best=new Map();
+    for(const w of ws){const k=w.lot+'|'+w.wafer,o=best.get(k);if(!o||w.endT>=o.endT)best.set(k,w);}
+    ws=ws.filter(w=>best.get(w.lot+'|'+w.wafer)===w);
+  }
+  return ws.sort((a,b)=>(a.lot+a.wafer).localeCompare(b.lot+b.wafer,undefined,{numeric:true}));
+}
+
+/* ====================== analysis ====================== */
+function analyze(W,t,mode,wantMap){
+  const zn=new Float64Array(5),zf=new Float64Array(5),bn=new Float64Array(10),bf=new Float64Array(10);
+  let N=0,F=0,ni=0,fi=0,no=0,fo=0,nW=0,wOut=0,wIn=0,Us=0,Vs=0;
+  const binCount=new Map(),cells=wantMap?new Map():null,diffs=[];
+  let gx0=1e9,gx1=-1e9,gy0=1e9,gy1=-1e9;
+  const wn=new Float64Array(10),wf=new Float64Array(10);
+  for(const w of W){
+    const T=w.T,te=w.tests[t],up=te.upper,lo=te.lower;
+    wn.fill(0);wf.fill(0);
+    let n=0,f=0,sr=0,sr2=0,srf=0,wni=0,wfi=0,wno=0,wfo=0;
+    for(let i=0;i<w.n;i++){
+      if(wantMap){const x=w.x[i],y=w.y[i];if(x<gx0)gx0=x;if(x>gx1)gx1=x;if(y<gy0)gy0=y;if(y>gy1)gy1=y;}
+      const v=w.vals[i*T+t];if(v!==v)continue;
+      let fail;
+      if(mode==='first'){if(w.ff[i]<t)continue;fail=w.ff[i]===t;}
+      else fail=(v>up)||(v<lo);
+      const r=w.r[i],zi=Math.min(Math.floor(r/0.2),4),bi=Math.min(Math.floor(r/0.1),9),b=fail?1:0;
+      n++;f+=b;sr+=r;sr2+=r*r;srf+=r*b;
+      zn[zi]++;zf[zi]+=b;wn[bi]++;wf[bi]+=b;bn[bi]++;bf[bi]+=b;
+      if(r<0.5){wni++;wfi+=b;}
+      if(r>=0.8){wno++;wfo+=b;}
+      if(fail)binCount.set(w.bin[i],(binCount.get(w.bin[i])||0)+1);
+      if(wantMap){const k=(w.x[i]+500)*1000+(w.y[i]+500);let c=cells.get(k);if(!c){c={x:w.x[i],y:w.y[i],n:0,f:0};cells.set(k,c);}c.n++;c.f+=b;}
+    }
+    if(!n)continue;
+    nW++;N+=n;F+=f;ni+=wni;fi+=wfi;no+=wno;fo+=wfo;
+    if(wni&&wno)diffs.push(100*(wfo/wno-wfi/wni));
+    if(f>0&&f<n&&n>1){
+      let sb=0;for(let i=0;i<10;i++)sb+=wn[i]*i;sb/=n;
+      let U=-f*sb,Sxx=0;for(let i=0;i<10;i++){U+=i*wf[i];Sxx+=wn[i]*(i-sb)*(i-sb);}
+      const V=f*(n-f)/(n*(n-1))*Sxx;if(V>0){Us+=U;Vs+=V;}
+      const rb=sr/n,Ur=srf-rb*f,Sr=sr2-n*rb*rb,Vr=f*(n-f)/(n*(n-1))*Sr;
+      if(Vr>0){const z=Ur/Math.sqrt(Vr);if(z>=1.96)wOut++;else if(z<=-1.96)wIn++;}
+    }
+  }
+  // pooled Cochran-Armitage over 5 zones
+  let zPool=NaN;
+  if(F>0&&F<N){
+    let sb=0;for(let i=0;i<5;i++)sb+=zn[i]*i;sb/=N;
+    let U=-F*sb,Sxx=0;for(let i=0;i<5;i++){U+=i*zf[i];Sxx+=zn[i]*(i-sb)*(i-sb);}
+    const p=F/N,V=p*(1-p)*Sxx;if(V>0)zPool=U/Math.sqrt(V);
+  }
+  const zStrat=Vs>0?Us/Math.sqrt(Vs):NaN,pPool=pOfZ(zPool),pStrat=pOfZ(zStrat);
+  const mk=(f,n)=>{const[lo,hi]=wilson(f,n);return{n,f,rate:n?f/n:NaN,lo,hi};};
+  const zones=[...zn].map((n,i)=>mk(zf[i],n)),fine=[...bn].map((n,i)=>mk(bf[i],n));
+  const inner=mk(fi,ni),outer=mk(fo,no);
+  const bins=[...binCount.entries()].sort((a,b)=>b[1]-a[1]);
+  // verdict
+  const sP=pPool<0.05,sS=pStrat<0.05;
+  let dir='none',lvl='none';
+  const d1=Math.sign(zStrat),d2=Math.sign(zPool);
+  if(sP&&sS&&d1===d2){lvl='sig';dir=d1>0?'out':'in';}
+  else if(sS){lvl='part';dir=d1>0?'out':'in';}
+  else if(sP){lvl='part';dir=d2>0?'out':'in';}
+  const A={N,F,rate:N?F/N:NaN,nW,zones,fine,inner,outer,ratio:inner.rate>0?outer.rate/inner.rate:NaN,
+    zPool,pPool,zStrat,pStrat,wOut,wIn,diffs,bins,dir,lvl,cells,t};
+  if(wantMap){
+    const lo=Math.min(gx0,gy0),hi=Math.max(gx1,gy1);
+    A.gx0=gx0;A.gx1=gx1;A.gy0=gy0;A.gy1=gy1;A.cc=(lo+hi)/2;A.Rn=(hi-lo)/2;
+    const minN=Math.max(1,Math.round(0.2*nW));let mx=0;
+    for(const c of cells.values())if(c.n>=minN&&c.f/c.n>mx)mx=c.f/c.n;
+    if(!mx)for(const c of cells.values())if(c.f/c.n>mx)mx=c.f/c.n;
+    A.mapMax=Math.max(0.01,Math.ceil(mx*100)/100);
+  }
+  return A;
+}
+function binLabel(A){
+  if(!A.bins.length)return '';
+  const t=A.bins.slice(0,3).map(b=>'#'+b[0]).join('/');return 'Bin'+t+(A.bins.length>3?'…':'');
+}
+
+/* ====================== charts (canvas) ====================== */
+const CMAP=[[0,'#ffffcc'],[.15,'#ffeda0'],[.3,'#fed976'],[.45,'#feb24c'],[.6,'#fd8d3c'],[.75,'#e31a1c'],[1,'#800026']];
+function cmap(t){t=Math.max(0,Math.min(1,t));for(let i=1;i<CMAP.length;i++)if(t<=CMAP[i][0]){
+  const[a,ca]=CMAP[i-1],[b,cb]=CMAP[i],u=(t-a)/(b-a),p=s=>[1,3,5].map(k=>parseInt(s.slice(k,k+2),16));
+  const A=p(ca),B=p(cb);return`rgb(${A.map((v,j)=>Math.round(v+(B[j]-v)*u)).join(',')})`;}return CMAP[CMAP.length-1][1];}
+function head(ctx,title,sub){
+  ctx.textAlign='left';ctx.textBaseline='alphabetic';
+  ctx.fillStyle='#f1f5f8';ctx.font=`700 14px ${SANS}`;ctx.fillText(title,24,24);
+  ctx.fillStyle=AMBER;ctx.font=`12px ${MONO}`;ctx.fillText(sub,24,42);
+}
+function axisText(ctx,s,x,y,rot){ctx.save();ctx.translate(x,y);if(rot)ctx.rotate(-Math.PI/2);ctx.fillStyle='#8896a1';ctx.font=`11px ${MONO}`;ctx.textAlign='center';ctx.fillText(s,0,0);ctx.restore();}
+
+const charts={
+ map:{name:'wafer_map',h:400,
+  title:(c)=>`${c.A.name} wafer map (fail rate)`,
+  sub:(c)=>`${c.A.nW} wafers · center (${c.A.cc}, ${c.A.cc}) R=${c.A.Rn}`,
+  draw(ctx,w,h,c){
+    const A=c.A;head(ctx,this.title(c),this.sub(c));
+    const px0=44,py0=58,pw=w-px0-84,ph=h-py0-36;
+    const cell=Math.min(pw,ph)/(2*(A.Rn+.5)+.6),mx=px0+pw/2,my=py0+ph/2,s=S.flip?-1:1;
+    const G={mx,my,cell,s,cc:A.cc};this.G=G;
+    for(const cl of A.cells.values()){
+      const X=mx+(cl.x-A.cc)*cell,Y=my+s*(cl.y-A.cc)*cell;
+      ctx.fillStyle=cmap((cl.f/cl.n)/A.mapMax);ctx.fillRect(X-cell/2,Y-cell/2,cell,cell);
+      if(cell>6){ctx.strokeStyle='rgba(30,22,16,.35)';ctx.lineWidth=.6;ctx.strokeRect(X-cell/2,Y-cell/2,cell,cell);}
+    }
+    ctx.save();ctx.setLineDash([4,4]);ctx.strokeStyle='rgba(255,255,255,.38)';ctx.lineWidth=1;
+    ctx.beginPath();ctx.arc(mx,my,(A.Rn+.5)*cell,0,Math.PI*2);ctx.stroke();ctx.restore();
+    const bx=w-50,bw=14,by=py0+14,bh=ph-40;
+    const g=ctx.createLinearGradient(0,by,0,by+bh);for(let i=0;i<=10;i++)g.addColorStop(i/10,cmap(1-i/10));
+    ctx.fillStyle=g;ctx.fillRect(bx,by,bw,bh);
+    ctx.fillStyle='#8896a1';ctx.font=`11px ${MONO}`;ctx.textAlign='left';
+    ctx.fillText(Math.round(A.mapMax*100)+'%',bx+bw+5,by+9);ctx.fillText('0%',bx+bw+5,by+bh);
+    axisText(ctx,'YAdr',14,my,true);axisText(ctx,'XAdr',mx,h-8,false);
+  },
+  hit(px,py,c){const G=this.G;if(!G)return null;
+    const x=Math.round(G.cc+(px-G.mx)/G.cell),y=Math.round(G.cc+(py-G.my)/(G.cell*G.s));
+    const cl=c.A.cells.get((x+500)*1000+(y+500));if(!cl)return null;
+    return`X=${x}  Y=${y}\ntested ${cl.n} · fail ${cl.f}\nrate ${pct(cl.f/cl.n,1)}`;}
+ },
+ profile:{name:'radial_profile',h:400,
+  title:(c)=>`${c.A.name} radial profile (95% CI)`,
+  sub:(c)=>`N=${c.A.N} fail=${c.A.F} · ${c.A.nW} wafers`,
+  draw(ctx,w,h,c){
+    const A=c.A;head(ctx,this.title(c),this.sub(c));
+    const pad={l:52,r:22,t:62,b:50},pw=w-pad.l-pad.r,ph=h-pad.t-pad.b;
+    const pts=A.fine.map((b,i)=>({...b,i})).filter(b=>b.n>0);
+    let lo=A.rate,hi=A.rate;for(const p of pts){lo=Math.min(lo,p.lo);hi=Math.max(hi,p.hi);}
+    lo*=100;hi*=100;const padv=(hi-lo)*.06+.2;lo=Math.max(0,lo-padv);hi+=padv;
+    const tk=ticks(lo,hi,6),X=v=>pad.l+v*pw,Y=v=>pad.t+ph-(v-lo)/(hi-lo)*ph;
+    this.G={X,Y,pad,pw,ph,pts};
+    ctx.lineWidth=1;ctx.strokeStyle='rgba(255,255,255,.07)';ctx.fillStyle='#8896a1';ctx.font=`10.5px ${MONO}`;
+    ctx.textAlign='right';
+    for(const v of tk.t){const y=Y(v);ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(pad.l+pw,y);ctx.stroke();ctx.fillText(+v.toFixed(2)+'',pad.l-7,y+3.5);}
+    ctx.textAlign='center';
+    for(let v=0;v<=1.0001;v+=.2){const x=X(v);ctx.beginPath();ctx.moveTo(x,pad.t);ctx.lineTo(x,pad.t+ph);ctx.stroke();ctx.fillText(v.toFixed(1),x,pad.t+ph+16);}
+    ctx.strokeStyle='rgba(255,255,255,.22)';ctx.beginPath();ctx.moveTo(pad.l,pad.t);ctx.lineTo(pad.l,pad.t+ph);ctx.lineTo(pad.l+pw,pad.t+ph);ctx.stroke();
+    // overall
+    ctx.save();ctx.setLineDash([4,4]);ctx.strokeStyle='rgba(255,255,255,.4)';ctx.beginPath();ctx.moveTo(pad.l,Y(A.rate*100));ctx.lineTo(pad.l+pw,Y(A.rate*100));ctx.stroke();ctx.restore();
+    ctx.strokeStyle=c.color;ctx.fillStyle=c.color;ctx.lineWidth=1.4;
+    for(const p of pts){const x=X(p.i/10+.05);ctx.beginPath();ctx.moveTo(x,Y(p.lo*100));ctx.lineTo(x,Y(p.hi*100));ctx.moveTo(x-3.5,Y(p.lo*100));ctx.lineTo(x+3.5,Y(p.lo*100));ctx.moveTo(x-3.5,Y(p.hi*100));ctx.lineTo(x+3.5,Y(p.hi*100));ctx.stroke();}
+    ctx.lineWidth=2;ctx.beginPath();pts.forEach((p,k)=>{const x=X(p.i/10+.05),y=Y(p.rate*100);k?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();
+    for(const p of pts){ctx.beginPath();ctx.arc(X(p.i/10+.05),Y(p.rate*100),3.6,0,7);ctx.fill();}
+    axisText(ctx,'normalized radius r/R (0=center, 1=edge)',pad.l+pw/2,h-8,false);axisText(ctx,'fail rate %',13,pad.t+ph/2,true);
+  },
+  hit(px,py,c){const G=this.G;if(!G)return null;
+    const v=(px-G.pad.l)/G.pw;if(v<0||v>1)return null;const i=Math.min(9,Math.floor(v*10)),b=c.A.fine[i];if(!b.n)return null;
+    return`r/R ${(i/10).toFixed(1)}–${((i+1)/10).toFixed(1)}\ntested ${fmtInt(b.n)} · fail ${fmtInt(b.f)}\nrate ${pct(b.rate)}  CI ${(b.lo*100).toFixed(1)}–${(b.hi*100).toFixed(1)}`;}
+ },
+ hist:{name:'per_wafer_outer_inner',h:400,
+  title:(c)=>`${c.A.name} per-wafer outer − inner`,
+  sub:(c)=>`median ${Number.isFinite(median(c.A.diffs))?median(c.A.diffs).toFixed(2):'—'}pp · ${c.A.diffs.length} wafers`,
+  draw(ctx,w,h,c){
+    const A=c.A,d=A.diffs;head(ctx,this.title(c),this.sub(c));
+    const pad={l:52,r:22,t:62,b:50},pw=w-pad.l-pad.r,ph=h-pad.t-pad.b;
+    if(!d.length){ctx.fillStyle='#8896a1';ctx.font=`12px ${MONO}`;ctx.textAlign='center';ctx.fillText('no wafer has both inner and outer dies tested',w/2,h/2);this.G=null;return;}
+    const med=median(d);let mn=Math.min(...d,0,med),mxv=Math.max(...d,0,med);
+    const step=niceStep((mxv-mn)||1,10),e0=Math.floor(mn/step)*step,nb=Math.max(1,Math.ceil((mxv-e0)/step+1e-9));
+    const cnt=new Array(nb).fill(0);for(const v of d)cnt[Math.min(nb-1,Math.floor((v-e0)/step))]++;
+    const e1=e0+nb*step,cmax=Math.max(...cnt),yt=ticks(0,cmax,5),ymax=Math.max(cmax,yt.t[yt.t.length-1]);
+    const X=v=>pad.l+(v-e0)/(e1-e0)*pw,Y=v=>pad.t+ph-v/ymax*ph;
+    this.G={X,Y,pad,pw,ph,e0,step,cnt,nb};
+    ctx.lineWidth=1;ctx.strokeStyle='rgba(255,255,255,.07)';ctx.fillStyle='#8896a1';ctx.font=`10.5px ${MONO}`;ctx.textAlign='right';
+    for(const v of yt.t){const y=Y(v);ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(pad.l+pw,y);ctx.stroke();ctx.fillText(v+'',pad.l-7,y+3.5);}
+    const xt=ticks(e0,e1,6);ctx.textAlign='center';
+    for(const v of xt.t){const x=X(v);ctx.beginPath();ctx.moveTo(x,pad.t);ctx.lineTo(x,pad.t+ph);ctx.stroke();ctx.fillText(+v.toFixed(2)+'',x,pad.t+ph+16);}
+    ctx.fillStyle=c.color+'cc';ctx.strokeStyle=c.color;
+    cnt.forEach((k,i)=>{if(!k)return;const x0=X(e0+i*step),x1=X(e0+(i+1)*step);ctx.fillRect(x0+.5,Y(k),x1-x0-1,Y(0)-Y(k));ctx.strokeRect(x0+.5,Y(k),x1-x0-1,Y(0)-Y(k));});
+    ctx.strokeStyle='rgba(255,255,255,.22)';ctx.beginPath();ctx.moveTo(pad.l,pad.t);ctx.lineTo(pad.l,pad.t+ph);ctx.lineTo(pad.l+pw,pad.t+ph);ctx.stroke();
+    ctx.strokeStyle='rgba(255,255,255,.85)';ctx.lineWidth=1.3;ctx.beginPath();ctx.moveTo(X(0),pad.t);ctx.lineTo(X(0),pad.t+ph);ctx.stroke();
+    ctx.strokeStyle=AMBER;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(X(med),pad.t);ctx.lineTo(X(med),pad.t+ph);ctx.stroke();
+    const lab=`median ${med.toFixed(2)}pp`;ctx.font=`11px ${MONO}`;ctx.fillStyle=AMBER;
+    if(X(med)+ctx.measureText(lab).width+8>w-pad.r){ctx.textAlign='right';ctx.fillText(lab,X(med)-5,pad.t+13);}else{ctx.textAlign='left';ctx.fillText(lab,X(med)+5,pad.t+13);}
+    axisText(ctx,'outer(r/R≥0.8) − inner(<0.5) fail rate (pp)',pad.l+pw/2,h-8,false);axisText(ctx,'# wafers',13,pad.t+ph/2,true);
+  },
+  hit(px,py,c){const G=this.G;if(!G)return null;const v=G.e0+(px-G.pad.l)/G.pw*(G.nb*G.step),i=Math.floor((v-G.e0)/G.step);
+    if(i<0||i>=G.nb)return null;return`[${(+(G.e0+i*G.step).toFixed(2))}, ${(+(G.e0+(i+1)*G.step).toFixed(2))}) pp\n${G.cnt[i]} wafer(s)`;}
+ }
+};
+
+/* ====================== render ====================== */
+function setupCanvas(cv,key,ctxObj){
+  const ch=charts[key];
+  const draw=()=>{
+    const w=cv.parentElement.clientWidth-32,h=ch.h,dpr=window.devicePixelRatio||1;
+    if(w<50)return;cv.style.height=h+'px';cv.width=Math.round(w*dpr);cv.height=Math.round(h*dpr);
+    const g=cv.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,w,h);ch.draw(g,w,h,ctxObj);
+  };
+  draw();
+  const tip=$('tip');
+  cv.onmousemove=e=>{const r=cv.getBoundingClientRect(),t=ch.hit(e.clientX-r.left,e.clientY-r.top,ctxObj);
+    if(!t){tip.style.display='none';return;}tip.textContent=t;tip.style.display='block';
+    tip.style.left=Math.min(e.clientX+14,innerWidth-tip.offsetWidth-8)+'px';tip.style.top=(e.clientY+14)+'px';};
+  cv.onmouseleave=()=>{tip.style.display='none';};
+  return draw;
+}
+function exportPNG(key,ctxObj){
+  const ch=charts[key],w=720,h=480,sc=2,cv=document.createElement('canvas');cv.width=w*sc;cv.height=h*sc;
+  const g=cv.getContext('2d');g.scale(sc,sc);g.fillStyle='#0f1417';g.fillRect(0,0,w,h);
+  const keep=ch.G;ch.draw(g,w,h,ctxObj);ch.G=keep;
+  cv.toBlob(b=>{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=`${ctxObj.A.name}_${ch.name}.png`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2000);});
+}
+
+function verdictText(A){
+  if(A.dir==='none')return{cls:'none',txt:'無顯著徑向趨勢'};
+  const side=A.dir==='out'?'外':'內';
+  return A.lvl==='sig'?{cls:A.dir,txt:`越${side}圈 fail 越多(顯著)`}
+                      :{cls:A.dir,txt:`傾向越${side}圈 fail 越多(僅部分檢定顯著)`};
+}
+function render(){
+  const ws=selectedWafers(),main=$('main');
+  S.charts.forEach(c=>c.ro&&c.ro.disconnect());S.charts=[];
+  const g=groups().find(g=>g.key===S.groupKey);
+  if(!g||!ws.length){main.innerHTML='<div class="empty">沒有符合條件的 wafer</div>';return;}
+  const T=ws[0].tests;
+  const sums=T.map((te,t)=>{const A=analyze(ws,t,S.mode,false);return{t,A};});
+  // test dropdown
+  const sel=$('selTest');
+  let list=sums.filter(s=>!S.hide||s.A.F>0);
+  if(!list.some(s=>s.t===S.test)){
+    const best=[...sums].sort((a,b)=>b.A.F-a.A.F)[0];
+    S.test=list.some(s=>s.t===best.t)?best.t:(list[0]?list[0].t:0);
+    if(!list.length)list=sums;
+  }
+  sel.innerHTML=list.map(s=>`<option value="${s.t}"${s.t===S.test?' selected':''}>${esc(T[s.t].short)}${T[s.t].unit?' ['+esc(T[s.t].unit)+']':''} — fail ${fmtInt(s.A.F)} / ${fmtInt(s.A.N)} (${pct(s.A.rate)})${s.A.bins.length?' · '+binLabel(s.A):''}</option>`).join('');
+  const t=S.test,A=analyze(ws,t,S.mode,true);A.name=T[t].short;
+  // colour = rank of the test by fail count within this selection (most fails -> coral, next -> blue ...)
+  const rank=[...sums].sort((a,b)=>b.A.F-a.A.F||a.t-b.t).findIndex(s=>s.t===t);
+  const color=PALETTE[rank%PALETTE.length];
+  const vt=verdictText(A);
+  if(!A.N||!A.F){
+    main.innerHTML=`<div class="card empty">${esc(A.name)}:${A.N?'此測項在所選資料中沒有 fail,無法做同心圓分析':'沒有受測資料'}</div>`+overviewHTML(sums,T,t);
+    bindOverview();return;
+  }
+  const zrows=A.zones.map((z,i)=>{const mxr=Math.max(...A.zones.map(q=>q.rate||0))||1;
+    return`<tr><td>${(i*.2).toFixed(1)}–${((i+1)*.2).toFixed(1)}</td><td>${fmtInt(z.n)}</td><td>${fmtInt(z.f)}</td><td>${pct(z.rate)}</td><td class="ci">${(z.lo*100).toFixed(1)}–${(z.hi*100).toFixed(1)}</td><td class="bar"><div class="track"><i style="width:${(z.rate/mxr*100).toFixed(1)}%;background:${color}"></i></div></td></tr>`;}).join('');
+  const cardTitle={map:`${esc(A.name)} wafer map (fail rate)`,profile:`${esc(A.name)} radial profile`,hist:`${esc(A.name)} per-wafer outer-inner`};
+  const cardSub={map:`stacked · ${A.nW} wafers`,profile:'95% Wilson CI',hist:'wafer-level consistency'};
+  main.innerHTML=`
+  <div class="ahead"><span class="tag" style="background:${color}">WAFER</span><h2>${esc(A.name)} fail · 同心圓分析</h2>
+    <span class="meta">${A.nW} wafers · tested N=${fmtInt(A.N)} · fail=${fmtInt(A.F)} (${pct(A.rate)})${A.bins.length?' · fail '+esc(binLabel(A)):''}</span></div>
+  <div class="card top-card">
+    <div>
+      <div class="verdict ${vt.cls}">${vt.txt}</div>
+      <div class="stats">
+        <div class="stat"><div class="k">Inner (R/R&lt;0.5)</div><div class="v">${pct(A.inner.rate)}</div></div>
+        <div class="stat"><div class="k">Outer (R/R≥0.8)</div><div class="v">${pct(A.outer.rate)}</div></div>
+        <div class="stat"><div class="k">Outer / Inner</div><div class="v">${Number.isFinite(A.ratio)?A.ratio.toFixed(2)+'×':'—'}</div></div>
+        <div class="stat"><div class="k">Pooled trend Z (P)</div><div class="v">${fmtZ(A.zPool)} <small>(${fmtP(A.pPool)})</small></div></div>
+        <div class="stat"><div class="k">Wafer-stratified Z (P)</div><div class="v">${fmtZ(A.zStrat)} <small>(${fmtP(A.pStrat)})</small></div></div>
+        <div class="stat"><div class="k">Wafers 外圈多 / 內圈多</div><div class="v">${A.wOut} / ${A.wIn} <small>of ${A.nW}</small></div></div>
+      </div>
+      <p class="note">z&gt;0 代表越外圈越多;|z|&gt;1.96 約為 p&lt;0.05。wafer-stratified 先在各 wafer 內檢定再合併,可排除 wafer／lot 基準 fail 率差異的影響。「Wafers 外圈多 / 內圈多」為單片 wafer 內徑向趨勢檢定 |z|≥1.96 的片數。</p>
+    </div>
+    <div><table class="zt"><thead><tr><th>R/R zone</th><th>N</th><th>Fail</th><th>Rate</th><th>95% CI</th><th></th></tr></thead><tbody>${zrows}</tbody></table></div>
+  </div>
+  <div class="charts">${['map','profile','hist'].map(k=>`<div class="card chart"><div class="ch"><div><h3>${cardTitle[k]}</h3><div class="sub">${cardSub[k]}</div></div><button class="png" data-k="${k}">⤓ PNG</button></div><canvas data-k="${k}"></canvas></div>`).join('')}</div>
+  ${overviewHTML(sums,T,t)}`;
+  const cx={A,color};
+  main.querySelectorAll('canvas').forEach(cv=>{
+    const k=cv.dataset.k,draw=setupCanvas(cv,k,cx),ro=new ResizeObserver(()=>draw());ro.observe(cv.parentElement);S.charts.push({ro});
+  });
+  main.querySelectorAll('.png').forEach(b=>b.onclick=()=>exportPNG(b.dataset.k,cx));
+  bindOverview();
+}
+function overviewHTML(sums,T,cur){
+  const rows=sums.filter(s=>s.A.F>0).map(({t,A})=>{
+    const v=A.lvl==='none'?{c:'none',x:'—'}:{c:A.dir,x:(A.dir==='out'?'外圈↑':'內圈↑')+(A.lvl==='part'?'(部分)':'')};
+    return`<tr data-t="${t}" class="${t===cur?'sel':''}"><td>${esc(T[t].short)}</td><td>${esc(binLabel(A))}</td><td>${fmtInt(A.N)}</td><td>${fmtInt(A.F)}</td><td>${pct(A.rate)}</td><td>${pct(A.inner.rate)}</td><td>${pct(A.outer.rate)}</td><td>${Number.isFinite(A.ratio)?A.ratio.toFixed(2)+'×':'—'}</td><td>${fmtZ(A.zPool)}</td><td>${fmtZ(A.zStrat)}</td><td class="pill ${v.c}">${v.x}</td></tr>`;}).join('');
+  return`<details class="ov" ${rows?'open':''}><summary>全測項總覽(點選列切換測項)</summary><div class="scroll"><table class="ovt"><thead><tr><th>測項</th><th>Fail Bin</th><th>N</th><th>Fail</th><th>Rate</th><th>Inner</th><th>Outer</th><th>O/I</th><th>Pooled Z</th><th>Strat Z</th><th>判定</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
+}
+function bindOverview(){
+  document.querySelectorAll('.ovt tbody tr').forEach(tr=>tr.onclick=()=>{S.test=+tr.dataset.t;render();window.scrollTo({top:0,behavior:'smooth'});});
+}
+
+/* ====================== controls ====================== */
+function refreshControls(){
+  const gs=groups(),has=gs.length>0;
+  $('controls').hidden=!has;$('btnClear').disabled=!S.log.length&&!has;
+  if(!has){$('main').innerHTML=dropHTML;bindDrop();return;}
+  if(!gs.some(g=>g.key===S.groupKey))S.groupKey=gs[0].key;
+  $('selProd').innerHTML=gs.map(g=>`<option value="${esc(g.key)}"${g.key===S.groupKey?' selected':''}>${esc(g.product)}${g.prodId?' · '+esc(g.prodId):''} (${g.wafers.length} files)</option>`).join('');
+  const g=gs.find(g=>g.key===S.groupKey),lots=[...new Set(g.wafers.map(w=>w.lot))].sort();
+  if(S.lot!=='ALL'&&!lots.includes(S.lot))S.lot='ALL';
+  $('selLot').innerHTML=`<option value="ALL"${S.lot==='ALL'?' selected':''}>全部 (${lots.length} lot)</option>`+lots.map(l=>`<option${l===S.lot?' selected':''}>${esc(l)}</option>`).join('');
+  render();
+}
+function filesPanel(){
+  const box=$('filesBox');box.hidden=!S.log.length;if(!S.log.length)return;
+  const ok=S.log.filter(l=>l.ok).length,bad=S.log.length-ok,lots=new Set(S.wafers.map(w=>w.lot)).size;
+  $('filesSum').innerHTML=`已載入 ${ok} 個 log · ${lots} lot${bad?` · <span class="err">${bad} 個略過/失敗</span>`:''}(點開看清單)`;
+  $('filesTbl').innerHTML='<thead><tr><th>檔案</th><th>Lot</th><th>Wafer</th><th>Dies</th><th>狀態</th></tr></thead><tbody>'+
+    S.log.map(l=>`<tr><td>${esc(l.name)}</td><td>${esc(l.lot||'')}</td><td>${esc(l.wafer||'')}</td><td>${l.n||''}</td><td class="${l.ok?'':'err'}">${esc(l.ok?(l.dup?'重複 Wafer ID':'OK'):l.msg)}</td></tr>`).join('')+'</tbody>';
+}
+
+/* ====================== file loading ====================== */
+async function loadFiles(fl){
+  fl=[...fl];if(!fl.length)return;
+  const prog=$('prog');let done=0;
+  try{
+    const items=[];
+    for(const f of fl){prog.textContent=`讀取 ${f.name} …`;
+      try{items.push(...await expand(f.name,new Uint8Array(await f.arrayBuffer())));}
+      catch(e){S.log.push({name:f.name,ok:false,msg:e.message});}}
+    const dec=new TextDecoder('latin1');
+    for(const it of items){
+      done++;
+      if(it.error){S.log.push({name:it.name,ok:false,msg:it.error});continue;}
+      if(!/\.(csv|txt)$/i.test(it.name)){S.log.push({name:it.name,ok:false,msg:'略過(非 csv)'});continue;}
+      if(done%4===0){prog.textContent=`解析 ${done} / ${items.length} …`;await new Promise(r=>setTimeout(r));}
+      try{const w=parseLog(dec.decode(it.bytes),it.name);S.wafers.push(w);S.log.push({name:it.name,ok:true,lot:w.lot,wafer:w.wafer,n:w.n});}
+      catch(e){S.log.push({name:it.name,ok:false,msg:e.message});}
+    }
+    const seen=new Map();for(const w of S.wafers){const k=w.lot+'|'+w.wafer;seen.set(k,(seen.get(k)||0)+1);}
+    for(const l of S.log)if(l.ok&&seen.get(l.lot+'|'+l.wafer)>1)l.dup=true;
+    prog.textContent='';
+  }catch(e){prog.textContent='';alert('載入失敗:'+e.message);}
+  filesPanel();refreshControls();
+}
+
+const dropHTML=$('main').innerHTML;
+function bindDrop(){const d=$('drop');if(!d)return;d.onclick=()=>$('file').click();}
+$('btnPick').onclick=()=>$('file').click();
+$('file').onchange=e=>{loadFiles(e.target.files);e.target.value='';};
+$('btnClear').onclick=()=>{S.wafers=[];S.log=[];S.groupKey=null;S.lot='ALL';S.test=0;filesPanel();refreshControls();};
+$('selProd').onchange=e=>{S.groupKey=e.target.value;S.lot='ALL';S.test=-1;refreshControls();};
+$('selLot').onchange=e=>{S.lot=e.target.value;S.test=-1;render();};
+$('selTest').onchange=e=>{S.test=+e.target.value;render();};
+$('selMode').onchange=e=>{S.mode=e.target.value;render();};
+$('chkHide').onchange=e=>{S.hide=e.target.checked;render();};
+$('chkDedup').onchange=e=>{S.dedup=e.target.checked;render();};
+$('chkFlip').onchange=e=>{S.flip=e.target.checked;render();};
+['dragenter','dragover'].forEach(ev=>window.addEventListener(ev,e=>{e.preventDefault();document.body.classList.add('dragging');}));
+['dragleave','drop'].forEach(ev=>window.addEventListener(ev,e=>{e.preventDefault();if(ev==='drop'||e.target===document.documentElement)document.body.classList.remove('dragging');}));
+window.addEventListener('drop',e=>{if(e.dataTransfer&&e.dataTransfer.files.length)loadFiles(e.dataTransfer.files);});
+bindDrop();
+</script>
+</body>
+</html>
