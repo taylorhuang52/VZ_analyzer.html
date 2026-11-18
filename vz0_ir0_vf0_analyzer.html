@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>VZ0/IR0/VF0 &middot; VZ1/IR2_1/VF1 Relationship Analyzer</title>
+<title>VZ0/IR0/VF0 &middot; VZ1/IR2_1/VF1 &middot; Wafer Ring Analyzer</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -147,6 +147,28 @@
   .r2-bar-wrap{width:60px; height:6px; background:var(--panel-2); border-radius:3px; overflow:hidden; display:inline-block; vertical-align:middle; margin-right:6px;}
   .r2-bar{height:100%; background:var(--teal);}
 
+  /* wafer analysis */
+  .wafer-summary{padding:16px 18px; margin-bottom:16px; display:grid; grid-template-columns:1.2fr 1fr; gap:22px;}
+  @media (max-width:900px){ .wafer-summary{grid-template-columns:1fr;} }
+  .verdict{
+    display:inline-block; font-family:'Space Grotesk',sans-serif; font-size:13px; font-weight:600;
+    padding:6px 12px; border-radius:5px; border:1px solid var(--line-strong); margin-bottom:12px;
+  }
+  .verdict.edge{color:var(--red); border-color:var(--red); background:var(--red-dim);}
+  .verdict.center{color:var(--amber); border-color:var(--amber); background:#2a2210;}
+  .verdict.none{color:var(--text-dim);}
+  .kpi-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:10px;}
+  @media (max-width:640px){ .kpi-grid{grid-template-columns:repeat(2,1fr);} }
+  .kpi-grid div{background:var(--panel-2); border:1px solid var(--line); border-radius:6px; padding:8px 10px;}
+  .kpi-grid span{display:block; font-size:9.5px; color:var(--text-faint); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:3px;}
+  .kpi-grid b{font-family:'Space Grotesk',sans-serif; font-size:14px; color:var(--text);}
+  .kpi-grid em{font-style:normal; font-size:10px; color:var(--text-faint); font-weight:400;}
+  .kpi-note{font-size:10.5px; color:var(--text-faint); margin-top:10px; line-height:1.6;}
+  input.numin{
+    width:52px; background:var(--panel-2); color:var(--text); border:1px solid var(--line-strong);
+    border-radius:5px; font-family:inherit; font-size:11.5px; padding:5px 6px; text-align:center;
+  }
+
   /* group headers */
   .group-block{margin-bottom:22px;}
   .group-title-row{
@@ -221,8 +243,8 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 14h4l2-8 4 16 3-11 2 6h5"/></svg>
       </div>
       <div>
-        <h1>VZ0/IR0/VF0 &middot; VZ1/IR2_1/VF1 Relationship Analyzer</h1>
-        <div class="sub">Zener dlogTDO test-log correlation tool &middot; pre-stress &amp; post-stress groups &middot; local, in-browser parsing</div>
+        <h1>VZ0/IR0/VF0 &middot; VZ1/IR2_1/VF1 Relationship &amp; Wafer Ring Analyzer</h1>
+        <div class="sub">Zener dlogTDO test-log correlation tool &middot; pre-/post-stress relationships &middot; IR0/DIR0 wafer-map &amp; concentric analysis &middot; local, in-browser parsing</div>
       </div>
     </div>
     <div class="status-chip"><span class="dot" id="statusDot"></span><span id="statusText">no data loaded</span></div>
@@ -232,7 +254,7 @@
     <div class="dropzone" id="dropzone">
       <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 16V4M12 4l-4 4M12 4l4 4"/><path d="M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3"/></svg></div>
       <div class="dz-title">拖曳 dlogTDO .csv 檔案到這裡，或點擊選擇檔案</div>
-      <div class="dz-sub">可一次匯入多個檔案／多個 lot，只擷取 Bin#1（良品）的 VZ0(7)/IR0(8)/VF0(10)（應力前）與 VZ1(11)/IR2_1(14)/VF1(17)（應力後）</div>
+      <div class="dz-sub">可一次匯入多個檔案／多個 lot，只擷取 Bin#1（良品）的 VZ0(7)/IR0(8)/VF0(10)（應力前）與 VZ1(11)/IR2_1(14)/VF1(17)（應力後）；Wafer 分析另使用所有 Bin 的 XAdr/YAdr 與 Wafer ID</div>
     </div>
     <input type="file" id="fileInput" multiple accept=".csv,.txt">
     <div class="filebar" id="filebar"></div>
@@ -261,6 +283,33 @@
           <option value="4">寬鬆 &middot; |z| &gt; 4.0</option>
           <option value="3.5" selected>建議 &middot; |z| &gt; 3.5</option>
           <option value="2.5">嚴格 &middot; |z| &gt; 2.5</option>
+        </select>
+      </div>
+      <div class="ctrl-row">
+        <div>
+          <div class="ctrl-label">Wafer 分析範圍 Scope</div>
+          <div class="ctrl-hint">僅影響下方 wafer map / 同心圓分析區（全部／單一 lot／單一 wafer）</div>
+        </div>
+        <select id="scopeSelect"><option value="all">全部 wafer</option></select>
+      </div>
+      <div class="ctrl-row">
+        <div>
+          <div class="ctrl-label">Fail Bin 定義</div>
+          <div class="ctrl-hint">IR0 fail Bin# ／ DIR0 fail Bin#（預設 8 ／ 9）</div>
+        </div>
+        <div style="display:flex; gap:6px;">
+          <input type="number" class="numin" id="irBinInput" value="8" min="0" step="1">
+          <input type="number" class="numin" id="dirBinInput" value="9" min="0" step="1">
+        </div>
+      </div>
+      <div class="ctrl-row">
+        <div>
+          <div class="ctrl-label">徑向分圈數 Rings</div>
+          <div class="ctrl-hint">radial profile 圖的 r/R 等寬分圈數</div>
+        </div>
+        <select id="ringSelect">
+          <option value="5">5</option><option value="8">8</option>
+          <option value="10" selected>10</option><option value="12">12</option>
         </select>
       </div>
       <div class="ctrl-row">
@@ -295,7 +344,7 @@
     VF0（正向壓降）與 IR0（反向漏電流）符合蕭克利二極體方程式：<b>VF0 ≈ A − n·V_T·ln(IR0)</b>，斜率換算出的理想因子 n 越接近 1，代表接面越接近理想 PN 接面。VZ0（崩潰電壓）由摻雜濃度主導的累增/齊納機制決定，物理機制與正向擴散電流不同，因此通常與 IR0 / VF0 相關性較弱。<br>
     同樣的物理關係也適用於應力後複測：<b>VF1 ≈ A &minus; n&middot;V_T&middot;ln(IR2_1)</b>，可用來比較應力前後理想因子 n 的變化，作為接面劣化 / 缺陷增加的指標。<br>
     <span class="tag">SCOPE</span>
-    僅使用 Bin#1（良品）資料；離群值排除為每張圖獨立計算（各關係的迴歸殘差各自判斷），不影響其他圖的資料集。若匯入的檔案沒有 VZ1(11)/IR2_1(14)/VF1(17) 欄位，只會顯示應力前三張圖。每張圖右上角都有 <b>PNG</b> 匯出按鈕，可個別下載該圖表（含標題與迴歸式浮水印）。
+    僅使用 Bin#1（良品）資料；離群值排除為每張圖獨立計算（各關係的迴歸殘差各自判斷），不影響其他圖的資料集。若匯入的檔案沒有 VZ1(11)/IR2_1(14)/VF1(17) 欄位，只會顯示應力前三張圖。<br><span class="tag">WAFER</span>Wafer 分析使用<b>所有 Bin</b> 的 XAdr/YAdr 座標（同 wafer 同座標重測只保留最後一次），晶圓中心以每列/每行 min-max 中點平均估算，r/R 以離中心最遠的 die 為 1（假設 die 長寬比 1:1）。IR0 fail = 指定 Bin（預設 Bin#8）；DIR0 只在 IR0 pass 後才量測，因此 DIR0 fail 率的分母是「有 DIR0 量測值」的 die。每張圖右上角都有 <b>PNG</b> 匯出按鈕，可個別下載該圖表（含標題與迴歸式浮水印）。
   </div>
 
 </div>
@@ -307,6 +356,7 @@
   // ---------- state ----------
   let allRows = [];        // {vz0, ir0, vf0, src}
   let loadedFiles = [];     // {name, count, error}
+  let allDies = [];         // every die (all bins): {wafer, lot, x, y, bin, serial, ir0, dir0}
 
   const dropzone = document.getElementById('dropzone');
   const fileInput = document.getElementById('fileInput');
@@ -321,6 +371,10 @@
   const statN = document.getElementById('statN');
   const statFiles = document.getElementById('statFiles');
   const statExcluded = document.getElementById('statExcluded');
+  const scopeSelect = document.getElementById('scopeSelect');
+  const irBinInput = document.getElementById('irBinInput');
+  const dirBinInput = document.getElementById('dirBinInput');
+  const ringSelect = document.getElementById('ringSelect');
 
   // ---------- parsing ----------
   function parseLog(text, sourceName){
@@ -347,6 +401,20 @@
       return { error: '欄位對應失敗（缺少 VZ0(7)/IR0(8)/VF0(10)/Bin#）', rows: [] };
     }
     const hasGroupB = [vz1Idx, ir21Idx, vf1Idx].every(v => v !== -1);
+    // wafer-map columns / identifiers (optional)
+    const xIdx = labelTokens.indexOf('XAdr');
+    const yIdx = labelTokens.indexOf('YAdr');
+    const serIdx = labelTokens.indexOf('Serial#');
+    const dir0Idx = headerTokens.indexOf('DIR0(9)');
+    let waferId = '', lotId = '';
+    for (let i = 0; i < headerIdx; i++){
+      const l = rawLines[i];
+      if (l.indexOf('Wafer ID') === 0) waferId = l.split(':').slice(1).join(':').trim();
+      else if (l.indexOf('Lot ID') === 0) lotId = l.split(':').slice(1).join(':').trim();
+    }
+    if (!waferId) waferId = sourceName;
+    if (!lotId) lotId = '(unknown)';
+    const dies = [];
     const rows = [];
     for (let i = dataLabelIdx + 1; i < rawLines.length; i++){
       const line = rawLines[i];
@@ -356,6 +424,14 @@
       const vz0 = parseFloat(cols[vz0Idx]);
       const ir0 = parseFloat(cols[ir0Idx]);
       const vf0 = parseFloat(cols[vf0Idx]);
+      if (xIdx !== -1 && yIdx !== -1){
+        const dx = parseInt(cols[xIdx], 10), dy = parseInt(cols[yIdx], 10);
+        if (isFinite(dx) && isFinite(dy) && isFinite(bin)){
+          const ser = serIdx !== -1 ? parseInt(cols[serIdx], 10) : i;
+          dies.push({ wafer: waferId, lot: lotId, x: dx, y: dy, bin, serial: isFinite(ser) ? ser : i,
+                      ir0, dir0: dir0Idx !== -1 ? parseFloat(cols[dir0Idx]) : NaN });
+        }
+      }
       if (bin === 1 && isFinite(vz0) && isFinite(ir0) && isFinite(vf0) && ir0 > 0){
         const row = { vz0, ir0, vf0, src: sourceName };
         if (hasGroupB){
@@ -369,7 +445,7 @@
         rows.push(row);
       }
     }
-    return { error: null, rows, hasGroupB };
+    return { error: null, rows, dies, hasGroupB };
   }
 
   // ---------- stats ----------
@@ -708,6 +784,8 @@
       });
     }
 
+    renderWaferSection();
+
     statExcluded.textContent = totalExcluded;
 
     // wire up export buttons
@@ -758,6 +836,419 @@
     return excludedCount;
   }
 
+  // ---------- wafer / radial (concentric) analysis ----------
+  function erfcApprox(x){
+    const z = Math.abs(x);
+    const t = 1/(1+0.5*z);
+    const r = t*Math.exp(-z*z-1.26551223+t*(1.00002368+t*(0.37409196+t*(0.09678418+t*(-0.18628806+t*(0.27886807+t*(-1.13520398+t*(1.48851587+t*(-0.82215223+t*0.17087277)))))))));
+    return x >= 0 ? r : 2 - r;
+  }
+  function pTwoSided(z){ return erfcApprox(Math.abs(z)/Math.SQRT2); }
+  function fmtP(p){ return p < 1e-3 ? p.toExponential(1) : p.toFixed(3); }
+  function wilson(k, n){
+    if (n === 0) return [0,0];
+    const z = 1.96, p = k/n, den = 1 + z*z/n;
+    const c = (p + z*z/(2*n))/den;
+    const h = z*Math.sqrt(p*(1-p)/n + z*z/(4*n*n))/den;
+    return [c-h, c+h];
+  }
+
+  // 同一 wafer 同座標若有重測，保留最後一次（Serial 最大者）
+  function dedupDies(){
+    const m = new Map();
+    for (const d of allDies){
+      const key = d.wafer + '|' + d.x + '|' + d.y;
+      const prev = m.get(key);
+      if (!prev || d.serial >= prev.serial) m.set(key, d);
+    }
+    return Array.from(m.values());
+  }
+
+  // 以每列/每行的 min-max 中點平均求晶圓中心，R = 離中心最遠的 die
+  function waferGeometry(dies){
+    const rowsM = new Map(), colsM = new Map();
+    let xmin=Infinity,xmax=-Infinity,ymin=Infinity,ymax=-Infinity;
+    for (const d of dies){
+      let r = rowsM.get(d.y); if (!r){ r = {min:d.x,max:d.x}; rowsM.set(d.y,r); }
+      r.min = Math.min(r.min,d.x); r.max = Math.max(r.max,d.x);
+      let c = colsM.get(d.x); if (!c){ c = {min:d.y,max:d.y}; colsM.set(d.x,c); }
+      c.min = Math.min(c.min,d.y); c.max = Math.max(c.max,d.y);
+      xmin=Math.min(xmin,d.x); xmax=Math.max(xmax,d.x); ymin=Math.min(ymin,d.y); ymax=Math.max(ymax,d.y);
+    }
+    let sx=0, sy=0;
+    rowsM.forEach(r => { sx += (r.min+r.max)/2; });
+    colsM.forEach(c => { sy += (c.min+c.max)/2; });
+    const cx = sx/rowsM.size, cy = sy/colsM.size;
+    let R = 0;
+    for (const d of dies) R = Math.max(R, Math.hypot(d.x-cx, d.y-cy));
+    return { cx, cy, R: R || 1, xmin, xmax, ymin, ymax };
+  }
+
+  const ZONE_EDGES = [0, 0.2, 0.4, 0.6, 0.8, 1.0001];
+  const ZONE_LABELS = ['0–0.2','0.2–0.4','0.4–0.6','0.6–0.8','0.8–1.0'];
+
+  function analyzeMetric(dies, geo, kind, failBin, ringN){
+    const pts = [];
+    for (const d of dies){
+      const v = kind === 'ir0' ? d.ir0 : d.dir0;
+      if (!isFinite(v)) continue;
+      pts.push({ wafer:d.wafer, x:d.x, y:d.y, f: d.bin === failBin ? 1 : 0,
+                 rn: Math.hypot(d.x-geo.cx, d.y-geo.cy)/geo.R });
+    }
+    const N = pts.length;
+    let K = 0; pts.forEach(p => { K += p.f; });
+
+    // 5 equal-width zones
+    const zk = [0,0,0,0,0], zn = [0,0,0,0,0];
+    pts.forEach(p => { const i = Math.min(4, Math.floor(p.rn/0.2)); zn[i]++; zk[i] += p.f; });
+    const zones = ZONE_LABELS.map((label,i)=>{
+      const [lo,hi] = wilson(zk[i], zn[i]);
+      return { label, k:zk[i], n:zn[i], rate: zn[i] ? 100*zk[i]/zn[i] : 0, lo:100*lo, hi:100*hi };
+    });
+
+    // pooled Cochran-Armitage trend (zone scores)
+    const scores = [0.1,0.3,0.5,0.7,0.9];
+    let caZ = NaN;
+    if (N > 0){
+      const p = K/N;
+      let T=0, sn=0, sn2=0;
+      for (let i=0;i<5;i++){
+        if (!zn[i]) continue;
+        T += scores[i]*(zk[i] - zn[i]*p);
+        sn += zn[i]*scores[i]; sn2 += zn[i]*scores[i]*scores[i];
+      }
+      const variance = p*(1-p)*(sn2 - sn*sn/N);
+      if (variance > 0) caZ = T/Math.sqrt(variance);
+    }
+
+    // inner / outer
+    let inN=0,inK=0,outN=0,outK=0;
+    pts.forEach(p => {
+      if (p.rn < 0.5){ inN++; inK += p.f; }
+      if (p.rn >= 0.8){ outN++; outK += p.f; }
+    });
+    const inRate = inN ? 100*inK/inN : NaN, outRate = outN ? 100*outK/outN : NaN;
+
+    // wafer-stratified trend + per-wafer stats
+    const wm = new Map();
+    pts.forEach(p => {
+      let w = wm.get(p.wafer);
+      if (!w){ w = {n:0,k:0,s:0,s2:0,sx:0,inN:0,inK:0,outN:0,outK:0}; wm.set(p.wafer,w); }
+      w.n++; w.k += p.f; w.s += p.rn; w.s2 += p.rn*p.rn; w.sx += p.rn*p.f;
+      if (p.rn < 0.5){ w.inN++; w.inK += p.f; }
+      if (p.rn >= 0.8){ w.outN++; w.outK += p.f; }
+    });
+    let sT=0, sV=0, posW=0, negW=0, nW=0;
+    const perWafer = [];
+    wm.forEach((w,name) => {
+      if (w.inN && w.outN) perWafer.push({ wafer:name, diff: 100*(w.outK/w.outN - w.inK/w.inN) });
+      if (w.k === 0 || w.k === w.n) return;
+      const p = w.k/w.n;
+      const t = w.sx - p*w.s;
+      const v = p*(1-p)*(w.s2 - w.s*w.s/w.n);
+      if (v <= 0) return;
+      sT += t; sV += v; nW++;
+      const z = t/Math.sqrt(v);
+      if (z > 1.96) posW++;
+      if (z < -1.96) negW++;
+    });
+    const stratZ = sV > 0 ? sT/Math.sqrt(sV) : NaN;
+    const diffs = perWafer.map(w => w.diff).sort((a,b)=>a-b);
+    const medDiff = diffs.length ? (diffs.length%2 ? diffs[(diffs.length-1)/2] : (diffs[diffs.length/2-1]+diffs[diffs.length/2])/2) : NaN;
+
+    // fine radial profile
+    const step = 1.0001/ringN;
+    const pk = new Array(ringN).fill(0), pn = new Array(ringN).fill(0);
+    pts.forEach(p => { const i = Math.min(ringN-1, Math.floor(p.rn/step)); pn[i]++; pk[i] += p.f; });
+    const profile = [];
+    for (let i=0;i<ringN;i++){
+      const [lo,hi] = wilson(pk[i], pn[i]);
+      profile.push({ mid:(i+0.5)*step, n:pn[i], k:pk[i], rate: pn[i] ? 100*pk[i]/pn[i] : NaN, lo:100*lo, hi:100*hi });
+    }
+
+    // stacked map
+    const mm = new Map();
+    pts.forEach(p => {
+      const key = p.x+'|'+p.y; let c = mm.get(key);
+      if (!c){ c = {x:p.x,y:p.y,k:0,n:0}; mm.set(key,c); }
+      c.n++; c.k += p.f;
+    });
+    const cells = Array.from(mm.values());
+
+    return { N, K, zones, caZ, caP: isFinite(caZ) ? pTwoSided(caZ) : NaN,
+             inRate, outRate, ratio: (inRate > 0) ? outRate/inRate : NaN,
+             stratZ, stratP: isFinite(stratZ) ? pTwoSided(stratZ) : NaN,
+             posW, negW, nW, nWafers: wm.size, perWafer, medDiff, profile, cells };
+  }
+
+  function verdictOf(a){
+    if (!a.N || !a.K) return { cls:'none', text:'無 fail 資料，無法判斷' };
+    if (!isFinite(a.stratZ)) return { cls:'none', text:'樣本不足，無法判斷' };
+    if (Math.abs(a.stratZ) < 1.96) return { cls:'none', text:'無顯著同心圓趨勢' };
+    return a.stratZ > 0
+      ? { cls:'edge', text:'越外圈 fail 越多（顯著）' }
+      : { cls:'center', text:'越內圈 fail 越多（顯著）' };
+  }
+
+  // ---- canvas helpers ----
+  function setupCanvas(canvas, cssH){
+    const dpr = window.devicePixelRatio || 1;
+    const cssW = canvas.clientWidth || 320;
+    canvas.width = cssW*dpr; canvas.height = cssH*dpr; canvas.style.height = cssH+'px';
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr,dpr);
+    ctx.clearRect(0,0,cssW,cssH);
+    ctx.fillStyle = '#12181a';
+    ctx.fillRect(0,0,cssW,cssH);
+    return { ctx, w:cssW, h:cssH };
+  }
+  function canvasTitle(ctx, title, sub, x){
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#e7eef0'; ctx.font = '600 12px Space Grotesk, JetBrains Mono, monospace';
+    ctx.fillText(title, x, 18);
+    if (sub){ ctx.fillStyle = '#ffb020'; ctx.font = '10.5px JetBrains Mono, monospace'; ctx.fillText(sub, x, 32); }
+  }
+
+  const YLORRD = [[255,255,204],[255,237,160],[254,217,118],[254,178,76],[253,141,60],[252,78,42],[227,26,28],[189,0,38],[128,0,38]];
+  function heatColor(t){
+    t = Math.max(0, Math.min(1, t));
+    const pos = t*(YLORRD.length-1), i = Math.min(YLORRD.length-2, Math.floor(pos)), f = pos - i;
+    const a = YLORRD[i], b = YLORRD[i+1];
+    return 'rgb(' + Math.round(a[0]+(b[0]-a[0])*f) + ',' + Math.round(a[1]+(b[1]-a[1])*f) + ',' + Math.round(a[2]+(b[2]-a[2])*f) + ')';
+  }
+
+  function drawWaferMap(canvas, a, geo, opts){
+    const { ctx, w, h } = setupCanvas(canvas, 290);
+    const padL = 34, padR = 58, padT = 44, padB = 26;
+    canvasTitle(ctx, opts.title, opts.subtitle, padL);
+    const nx = geo.xmax - geo.xmin + 1, ny = geo.ymax - geo.ymin + 1;
+    const aw = w - padL - padR, ah = h - padT - padB;
+    const cell = Math.max(2, Math.min(aw/nx, ah/ny));
+    const ox = padL + (aw - cell*nx)/2, oy = padT + (ah - cell*ny)/2;
+    let vmax = 0;
+    a.cells.forEach(c => { if (c.n) vmax = Math.max(vmax, 100*c.k/c.n); });
+    if (vmax <= 0) vmax = 1;
+    a.cells.forEach(c => {
+      if (!c.n) return;
+      const px = ox + (c.x - geo.xmin)*cell, py = oy + (geo.ymax - c.y)*cell;
+      ctx.fillStyle = heatColor((100*c.k/c.n)/vmax);
+      ctx.fillRect(px, py, cell-0.6, cell-0.6);
+    });
+    // wafer outline
+    ctx.strokeStyle = '#566264'; ctx.lineWidth = 1;
+    if (ctx.setLineDash) ctx.setLineDash([4,3]);
+    ctx.beginPath();
+    ctx.arc(ox + (geo.cx - geo.xmin + 0.5)*cell, oy + (geo.ymax - geo.cy + 0.5)*cell, (geo.R + 0.6)*cell, 0, Math.PI*2);
+    ctx.stroke();
+    if (ctx.setLineDash) ctx.setLineDash([]);
+    // colour bar
+    const bx = w - padR + 16, bw = 10, bh = Math.min(150, ah), by = padT + (ah - bh)/2;
+    for (let i=0;i<bh;i++){
+      ctx.fillStyle = heatColor(1 - i/bh);
+      ctx.fillRect(bx, by+i, bw, 1.5);
+    }
+    ctx.fillStyle = '#8ea0a3'; ctx.font = '9px JetBrains Mono, monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillText(vmax.toFixed(vmax < 10 ? 1 : 0) + '%', bx + bw + 4, by);
+    ctx.fillText('0%', bx + bw + 4, by + bh);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText('XAdr', ox + cell*nx/2, h - 8);
+    ctx.save(); ctx.translate(10, oy + cell*ny/2); ctx.rotate(-Math.PI/2); ctx.fillText('YAdr', 0, 0); ctx.restore();
+  }
+
+  function drawProfile(canvas, a, opts){
+    const { ctx, w, h } = setupCanvas(canvas, 290);
+    const padL = 46, padR = 14, padT = 44, padB = 36;
+    const plotW = w - padL - padR, plotH = h - padT - padB;
+    canvasTitle(ctx, opts.title, opts.subtitle, padL);
+    const pts = a.profile.filter(p => p.n > 0);
+    if (!pts.length){ ctx.fillStyle='#8ea0a3'; ctx.font='11px JetBrains Mono, monospace'; ctx.fillText('no data', padL, padT+20); return; }
+    const overall = a.N ? 100*a.K/a.N : 0;
+    let yMin = Math.min(overall, ...pts.map(p=>p.lo)), yMax = Math.max(overall, ...pts.map(p=>p.hi));
+    const pad = (yMax-yMin)*0.1 || 1;
+    yMin = Math.max(0, yMin - pad); yMax += pad;
+    const sx = x => padL + x*plotW;
+    const sy = y => padT + plotH - (y-yMin)/(yMax-yMin)*plotH;
+    ctx.lineWidth = 1; ctx.font = '9px JetBrains Mono, monospace';
+    niceTicks(yMin, yMax, 5).forEach(t => {
+      const py = sy(t); if (py < padT-2 || py > padT+plotH+2) return;
+      ctx.strokeStyle = '#1b2224'; ctx.beginPath(); ctx.moveTo(padL,py); ctx.lineTo(padL+plotW,py); ctx.stroke();
+      ctx.fillStyle = '#566264'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      ctx.fillText(t.toFixed(t < 10 ? 1 : 0), padL-6, py);
+    });
+    [0,0.2,0.4,0.6,0.8,1].forEach(t => {
+      const px = sx(t);
+      ctx.strokeStyle = '#1b2224'; ctx.beginPath(); ctx.moveTo(px,padT); ctx.lineTo(px,padT+plotH); ctx.stroke();
+      ctx.fillStyle = '#566264'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.fillText(t.toFixed(1), px, padT+plotH+6);
+    });
+    ctx.strokeStyle = '#34403f'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(padL,padT); ctx.lineTo(padL,padT+plotH); ctx.lineTo(padL+plotW,padT+plotH); ctx.stroke();
+    // overall line
+    ctx.strokeStyle = '#8ea0a3'; ctx.lineWidth = 1;
+    if (ctx.setLineDash) ctx.setLineDash([3,3]);
+    ctx.beginPath(); ctx.moveTo(padL, sy(overall)); ctx.lineTo(padL+plotW, sy(overall)); ctx.stroke();
+    if (ctx.setLineDash) ctx.setLineDash([]);
+    // error bars + line
+    ctx.strokeStyle = opts.color; ctx.fillStyle = opts.color; ctx.lineWidth = 1.2;
+    pts.forEach(p => {
+      const px = sx(p.mid);
+      ctx.beginPath(); ctx.moveTo(px, sy(p.lo)); ctx.lineTo(px, sy(p.hi));
+      ctx.moveTo(px-3, sy(p.lo)); ctx.lineTo(px+3, sy(p.lo));
+      ctx.moveTo(px-3, sy(p.hi)); ctx.lineTo(px+3, sy(p.hi)); ctx.stroke();
+    });
+    ctx.lineWidth = 1.8; ctx.beginPath();
+    pts.forEach((p,i) => { const px = sx(p.mid), py = sy(p.rate); if (i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py); });
+    ctx.stroke();
+    pts.forEach(p => { ctx.beginPath(); ctx.arc(sx(p.mid), sy(p.rate), 3, 0, Math.PI*2); ctx.fill(); });
+    ctx.fillStyle = '#8ea0a3'; ctx.font = '10px JetBrains Mono, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText('normalized radius r/R (0=center, 1=edge)', padL+plotW/2, h-4);
+    ctx.save(); ctx.translate(11, padT+plotH/2); ctx.rotate(-Math.PI/2); ctx.fillText('fail rate %', 0, 0); ctx.restore();
+  }
+
+  function drawHist(canvas, a, opts){
+    const { ctx, w, h } = setupCanvas(canvas, 290);
+    const padL = 46, padR = 14, padT = 44, padB = 36;
+    const plotW = w - padL - padR, plotH = h - padT - padB;
+    canvasTitle(ctx, opts.title, opts.subtitle, padL);
+    const diffs = a.perWafer.map(p => p.diff);
+    if (!diffs.length){ ctx.fillStyle='#8ea0a3'; ctx.font='11px JetBrains Mono, monospace'; ctx.fillText('no wafer data', padL, padT+20); return; }
+    let lo = Math.min(0, ...diffs), hi = Math.max(0, ...diffs);
+    if (hi - lo < 1){ lo -= 0.5; hi += 0.5; }
+    const span = hi - lo; lo -= span*0.04; hi += span*0.04;
+    const nb = Math.min(20, Math.max(6, Math.ceil(Math.sqrt(diffs.length)*2)));
+    const bw = (hi-lo)/nb, counts = new Array(nb).fill(0);
+    diffs.forEach(v => { counts[Math.min(nb-1, Math.floor((v-lo)/bw))]++; });
+    const cmax = Math.max(...counts);
+    const sx = x => padL + (x-lo)/(hi-lo)*plotW;
+    const sy = c => padT + plotH - c/(cmax*1.1)*plotH;
+    ctx.font = '9px JetBrains Mono, monospace'; ctx.lineWidth = 1;
+    niceTicks(0, cmax*1.1, 4).forEach(t => {
+      if (t !== Math.round(t)) return;
+      const py = sy(t); if (py < padT-2 || py > padT+plotH+2) return;
+      ctx.strokeStyle = '#1b2224'; ctx.beginPath(); ctx.moveTo(padL,py); ctx.lineTo(padL+plotW,py); ctx.stroke();
+      ctx.fillStyle = '#566264'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillText(String(t), padL-6, py);
+    });
+    niceTicks(lo, hi, 5).forEach(t => {
+      const px = sx(t); if (px < padL-2 || px > padL+plotW+2) return;
+      ctx.fillStyle = '#566264'; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillText(String(t), px, padT+plotH+6);
+    });
+    ctx.fillStyle = opts.color + 'bb';
+    counts.forEach((c,i) => { if (!c) return; ctx.fillRect(sx(lo+i*bw)+0.5, sy(c), sx(lo+(i+1)*bw)-sx(lo+i*bw)-1, padT+plotH-sy(c)); });
+    ctx.strokeStyle = '#34403f'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(padL,padT); ctx.lineTo(padL,padT+plotH); ctx.lineTo(padL+plotW,padT+plotH); ctx.stroke();
+    ctx.strokeStyle = '#e7eef0'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(sx(0),padT); ctx.lineTo(sx(0),padT+plotH); ctx.stroke();
+    if (isFinite(a.medDiff)){
+      ctx.strokeStyle = '#ffb020'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(sx(a.medDiff),padT); ctx.lineTo(sx(a.medDiff),padT+plotH); ctx.stroke();
+      ctx.fillStyle = '#ffb020'; ctx.font = '10px JetBrains Mono, monospace'; ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText('median ' + a.medDiff.toFixed(2) + 'pp', padL+plotW-4, padT+12);
+    }
+    ctx.fillStyle = '#8ea0a3'; ctx.font = '10px JetBrains Mono, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText('outer(r/R≥0.8) − inner(<0.5) fail rate (pp)', padL+plotW/2, h-4);
+    ctx.save(); ctx.translate(11, padT+plotH/2); ctx.rotate(-Math.PI/2); ctx.fillText('# wafers', 0, 0); ctx.restore();
+  }
+
+  function buildWaferCard(id, title, caption){
+    return `
+    <div class="panel chart-card">
+      <div class="chart-head">
+        <div>
+          <div class="chart-title">${title}</div>
+          <div class="chart-eq" id="${id}-cap">${caption}</div>
+        </div>
+        <button class="export-btn" data-export="${id}" title="下載此圖 PNG">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12M12 15l-4-4M12 15l4-4"/><path d="M4 19h16"/></svg>
+          PNG
+        </button>
+      </div>
+      <canvas id="${id}-canvas"></canvas>
+    </div>`;
+  }
+
+  function waferSectionHTML(m, a, scopeLabel){
+    const v = verdictOf(a);
+    const rate = a.N ? 100*a.K/a.N : 0;
+    const zmax = Math.max(1e-9, ...a.zones.map(z => z.rate));
+    const zoneRows = a.zones.map(z => `
+      <tr>
+        <td>${z.label}</td><td>${z.n.toLocaleString()}</td><td>${z.k.toLocaleString()}</td>
+        <td><b>${z.rate.toFixed(2)}%</b></td>
+        <td style="color:var(--text-faint)">${z.n ? z.lo.toFixed(1)+'–'+z.hi.toFixed(1) : '—'}</td>
+        <td><span class="r2-bar-wrap" style="width:90px"><span class="r2-bar" style="display:block;width:${(z.rate/zmax*100).toFixed(0)}%;background:${m.color}"></span></span></td>
+      </tr>`).join('');
+    const f1 = x => isFinite(x) ? x.toFixed(2) : '—';
+    return `
+    <div class="group-block">
+      <div class="group-title-row">
+        <div class="group-title"><span class="idx" style="background:${m.color}">WAFER</span>${m.name} fail &middot; 同心圓分析</div>
+        <div class="group-sub">${scopeLabel} &middot; tested N=${a.N.toLocaleString()} &middot; fail=${a.K.toLocaleString()} (${rate.toFixed(2)}%) &middot; fail Bin#${m.bin}</div>
+      </div>
+      <div class="panel wafer-summary">
+        <div>
+          <div class="verdict ${v.cls}">${v.text}</div>
+          <div class="kpi-grid">
+            <div><span>inner (r/R&lt;0.5)</span><b>${f1(a.inRate)}%</b></div>
+            <div><span>outer (r/R&ge;0.8)</span><b>${f1(a.outRate)}%</b></div>
+            <div><span>outer / inner</span><b>${f1(a.ratio)}&times;</b></div>
+            <div><span>pooled trend z (p)</span><b>${f1(a.caZ)} (${isFinite(a.caP) ? fmtP(a.caP) : '—'})</b></div>
+            <div><span>wafer-stratified z (p)</span><b>${f1(a.stratZ)} (${isFinite(a.stratP) ? fmtP(a.stratP) : '—'})</b></div>
+            <div><span>wafers 外圈多 / 內圈多</span><b>${a.posW} / ${a.negW} <em>of ${a.nW}</em></b></div>
+          </div>
+          <div class="kpi-note">z&gt;0 代表越外圈越多；|z|&gt;1.96 約為 p&lt;0.05。wafer-stratified 先在各 wafer 內檢定再合併，可排除 wafer／lot 基準 fail 率差異的影響。</div>
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="sumtable">
+            <thead><tr><th>r/R zone</th><th>N</th><th>fail</th><th>rate</th><th>95% CI</th><th></th></tr></thead>
+            <tbody>${zoneRows}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="charts">
+        ${buildWaferCard(m.id+'m', m.name + ' wafer map (fail rate)', 'stacked · ' + scopeLabel)}
+        ${buildWaferCard(m.id+'p', m.name + ' radial profile', '95% Wilson CI')}
+        ${buildWaferCard(m.id+'h', m.name + ' per-wafer outer-inner', 'wafer-level consistency')}
+      </div>
+    </div>`;
+  }
+
+  function renderWaferSection(){
+    if (!allDies.length) return;
+    const dies = dedupDies();
+    if (!dies.length) return;
+    const geo = waferGeometry(dies);
+    const scope = scopeSelect.value;
+    let scoped = dies, scopeLabel = 'all wafers';
+    if (scope.indexOf('lot:') === 0){ const lot = scope.slice(4); scoped = dies.filter(d => d.lot === lot); scopeLabel = 'lot ' + lot; }
+    else if (scope.indexOf('wafer:') === 0){ const wf = scope.slice(6); scoped = dies.filter(d => d.wafer === wf); scopeLabel = 'wafer ' + wf; }
+    else scopeLabel = new Set(dies.map(d => d.wafer)).size + ' wafers';
+    const irBin = parseInt(irBinInput.value, 10), dirBin = parseInt(dirBinInput.value, 10);
+    const ringN = parseInt(ringSelect.value, 10) || 10;
+    const metrics = [
+      { id:'w1', key:'ir0',  name:'IR0',  bin: isFinite(irBin) ? irBin : 8,  color:'#ff7a59' },
+      { id:'w2', key:'dir0', name:'DIR0', bin: isFinite(dirBin) ? dirBin : 9, color:'#5fb3ff' }
+    ];
+    const results = metrics.map(m => ({ m, a: analyzeMetric(scoped, geo, m.key, m.bin, ringN) }));
+    mainArea.insertAdjacentHTML('beforeend', results.map(r => waferSectionHTML(r.m, r.a, scopeLabel)).join(''));
+    results.forEach(({m,a}) => {
+      const sub = scopeLabel + ' · center (' + geo.cx.toFixed(1) + ', ' + geo.cy.toFixed(1) + ') R=' + geo.R.toFixed(1);
+      drawWaferMap(document.getElementById(m.id+'m-canvas'), a, geo, { title: m.name + ' wafer map (fail rate)', subtitle: sub });
+      drawProfile(document.getElementById(m.id+'p-canvas'), a, { title: m.name + ' radial profile (95% CI)', subtitle: 'N=' + a.N + ' fail=' + a.K + ' · ' + scopeLabel, color: m.color });
+      drawHist(document.getElementById(m.id+'h-canvas'), a, { title: m.name + ' per-wafer outer − inner', subtitle: (isFinite(a.medDiff) ? 'median ' + a.medDiff.toFixed(2) + 'pp · ' : '') + a.perWafer.length + ' wafers', color: m.color });
+    });
+  }
+
+  function populateScope(){
+    const prev = scopeSelect.value;
+    const lots = Array.from(new Set(allDies.map(d => d.lot))).sort();
+    const wafers = Array.from(new Set(allDies.map(d => d.wafer))).sort();
+    let html = '<option value="all">全部 wafer</option>';
+    lots.forEach(l => { html += '<option value="lot:' + l + '">Lot · ' + l + '</option>'; });
+    wafers.forEach(wf => { html += '<option value="wafer:' + wf + '">Wafer · ' + wf + '</option>'; });
+    scopeSelect.innerHTML = html;
+    if (Array.from(scopeSelect.options).some(o => o.value === prev)) scopeSelect.value = prev;
+  }
+
   // ---------- file handling ----------
   function handleFiles(fileList){
     const files = Array.from(fileList).filter(f => /\.(csv|txt)$/i.test(f.name));
@@ -767,16 +1258,16 @@
       const reader = new FileReader();
       reader.onload = function(e){
         const text = e.target.result;
-        const { error, rows } = parseLog(text, file.name);
+        const { error, rows, dies } = parseLog(text, file.name);
         loadedFiles.push({ name: file.name, count: rows.length, error });
-        if (!error) allRows = allRows.concat(rows);
+        if (!error){ allRows = allRows.concat(rows); allDies = allDies.concat(dies || []); }
         pending--;
-        if (pending === 0){ renderFileBar(); render(); }
+        if (pending === 0){ renderFileBar(); populateScope(); render(); }
       };
       reader.onerror = function(){
         loadedFiles.push({ name: file.name, count:0, error:'讀取失敗' });
         pending--;
-        if (pending === 0){ renderFileBar(); render(); }
+        if (pending === 0){ renderFileBar(); populateScope(); render(); }
       };
       reader.readAsText(file, 'ISO-8859-1');
     });
@@ -809,11 +1300,15 @@
   thresholdSelect.addEventListener('change', render);
 
   resetBtn.addEventListener('click', ()=>{
-    allRows = []; loadedFiles = [];
+    allRows = []; allDies = []; loadedFiles = [];
     fileInput.value = '';
     renderFileBar();
+    populateScope();
     render();
   });
+
+  [scopeSelect, ringSelect].forEach(el => el.addEventListener('change', render));
+  [irBinInput, dirBinInput].forEach(el => el.addEventListener('change', render));
 
   window.addEventListener('resize', ()=>{ if (allRows.length) render(); });
 
